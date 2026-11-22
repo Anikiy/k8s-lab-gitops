@@ -1,0 +1,29 @@
+{{- $app := .Values.vlsingle }}
+{{- if $app.enabled }}
+{{- if or .Values.vlcluster.enabled .Values.vldistributed.enabled }}
+  {{- fail "Only one of .Values.vlsingle.enabled, .Values.vldistributed.enabled and .Values.vlcluster.enabled can be true"}}
+{{- end }}
+{{- $ctx := dict "helm" . "appKey" (list "vlsingle" "spec") }}
+{{- $fullname := include "vm.cr.fullname" $ctx }}
+{{- $ns := include "vm.namespace" $ctx }}
+apiVersion: operator.victoriametrics.com/v1
+kind: VLSingle
+metadata:
+  {{- $_ := set $ctx "extraAnnotations" $app.annotations }}
+  {{- with (include "vm.annotations" $ctx) }}
+  annotations: {{ . | nindent 4 }}
+  {{- end }}
+  {{- $_ := unset $ctx "extraAnnotations" }}
+  name: {{ $fullname }}
+  namespace: {{ $ns }}
+  {{- $_ := set $ctx "style" "managed" }}
+  {{- $_ := set $ctx "extraLabels" ($app.labels | default dict) }}
+  {{- $labels := include "vm.labels" $ctx | fromYaml }}
+  {{- $_ := unset $ctx "extraLabels" }}
+  {{- $version := include "vm.versions.resolve" (dict "helm" . "tag" ($app.spec.image).tag "key" "logs") }}
+  {{- with $version }}
+    {{- $_ := set $labels "app.kubernetes.io/version" (include "vm.version.label" .) }}
+  {{- end }}
+  labels: {{ toYaml $labels | nindent 4 }}
+spec: {{ include "vl.single.spec" $ctx | nindent 2 }}
+{{- end }}

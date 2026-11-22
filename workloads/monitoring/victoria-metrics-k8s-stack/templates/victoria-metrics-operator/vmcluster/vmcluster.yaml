@@ -1,0 +1,29 @@
+{{- $app := .Values.vmcluster }}
+{{- if $app.enabled }}
+{{- if or .Values.vmsingle.enabled .Values.vmdistributed.enabled }}
+  {{- fail "Only one of .Values.vmsingle.enabled, .Values.vmdistributed.enabled and .Values.vmcluster.enabled can be true" }}
+{{- end }}
+{{- $ctx := dict "helm" . "appKey" (list "vmcluster" "spec") }}
+{{- $fullname := include "vm.cr.fullname" $ctx }}
+{{- $ns := include "vm.namespace" $ctx }}
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMCluster
+metadata:
+  {{- $_ := set $ctx "extraAnnotations" $app.annotations }}
+  {{- with (include "vm.annotations" $ctx) }}
+  annotations: {{ . | nindent 4 }}
+  {{- end }}
+  {{- $_ := unset $ctx "extraAnnotations" }}
+  name: {{ $fullname }}
+  namespace: {{ $ns }}
+  {{- $_ := set $ctx "style" "managed" }}
+  {{- $_ := set $ctx "extraLabels" ($app.labels | default dict) }}
+  {{- $labels := include "vm.labels" $ctx | fromYaml }}
+  {{- $_ := unset $ctx "extraLabels" }}
+  {{- if $app.spec.clusterVersion }}
+    {{- $_ := set $labels "app.kubernetes.io/version" (include "vm.version.label" $app.spec.clusterVersion) }}
+  {{- end }}
+  labels: {{ toYaml $labels | nindent 4 }}
+spec: {{ include "vm.cluster.spec" $ctx | nindent 2 }}
+{{- end }}

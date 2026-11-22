@@ -1,0 +1,107 @@
+nameOverride: vmks
+
+# ---------- бэкенд: mon-metrics (уже есть) ----------
+vmsingle:  { enabled: false }
+vmcluster: { enabled: false }
+external:
+  vm:
+    read:  { url: "http://10.10.10.52:8428" }
+    write: { url: "http://10.10.10.52:8428/api/v1/write" }
+
+# ---------- Grafana уже развёрнута и подключена ----------
+grafana:
+  enabled: false
+defaultDashboards:
+  enabled: false
+  dashboards:
+    k8s-windows-node-rsrc-use:        { enabled: false }
+    k8s-windows-cluster-rsrc-use:     { enabled: false }
+    k8s-resources-windows-cluster:    { enabled: false }
+    k8s-resources-windows-namespace:  { enabled: false }
+    k8s-resources-windows-pod:        { enabled: false }
+    nodes-darwin:                     { enabled: false }
+    nodes-aix:                        { enabled: false }
+    k8s-resources-multicluster:       { enabled: false }   # кластер один            # отдаём ConfigMap'ы с label grafana_dashboard=1
+  annotations:
+    argocd.argoproj.io/sync-options: ServerSideApply=true
+defaultRules:
+  enabled: true
+
+# ---------- RU: ничего не качаем в рантайме ----------
+syncJob:
+  enabled: false
+
+# ---------- сборщик ----------
+vmagent:
+  enabled: true
+  spec:
+    replicaCount: 1
+    scrapeInterval: 30s
+    selectAllByDefault: true
+    externalLabels:
+      cluster: k8s-lab
+    extraArgs:
+      promscrape.streamParse: "true"
+      remoteWrite.flushInterval: "5s"
+      remoteWrite.queues: "4"
+      remoteWrite.tmpDataPath: "/tmp/vmagent-buffer"
+      remoteWrite.maxDiskUsagePerURL: "2GB"
+    resources:
+      requests: { cpu: 100m, memory: 256Mi }
+      limits:   { memory: 1Gi }
+  # если remoteWrite не подхватится из external.vm — раскомментируй:
+  # additionalRemoteWrites:
+  #   - url: "http://10.10.10.5defaultDatasources2:8428/api/v1/write"
+
+defaultDatasources:
+  victoriametrics:
+    datasources:
+      - name: VictoriaMetrics
+        uid: P4169E866C3094E38
+        type: prometheus
+        url: http://10.10.10.52:8428
+        access: proxy
+
+vmalert:
+  enabled: true
+  spec:
+    evaluationInterval: 30s
+    externalLabels: { cluster: k8s-lab }
+
+# ---------- этап 1: заглушка. этап 2: configSecret из OpenBao (см. §6) ----------
+alertmanager:
+  enabled: true
+  config:
+    route: { receiver: blackhole, group_by: [alertname, cluster] }
+    receivers: [{ name: blackhole }]
+  # spec:
+  #   configSecret: vmalertmanager-config     # <- включаешь вместе с ExternalSecret
+
+# ---------- экспортеры ----------
+prometheus-node-exporter: { enabled: true }
+kube-state-metrics:       { enabled: true }
+
+kubelet:               { enabled: true }
+coreDns:               { enabled: true }
+kubeApiServer:         { enabled: true }
+kubeControllerManager: { enabled: true }
+kubeScheduler:         { enabled: true }
+kubeProxy:             { enabled: true }
+
+# ---------- etcd ВНЕ кластера ----------
+kubeEtcd:
+  enabled: true
+  endpoints:
+    - 10.10.10.21
+    - 10.10.10.22
+    - 10.10.10.23
+  service:
+    port: 2381
+    targetPort: 2381
+  vmScrape:
+    spec:
+      jobLabel: app.kubernetes.io/component
+      namespaceSelector: { matchNames: [kube-system] }
+      endpoints:
+        - port: http-metrics
+          scheme: http

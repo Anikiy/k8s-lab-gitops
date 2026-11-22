@@ -1,0 +1,2863 @@
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  labels:
+    app.kubernetes.io/instance: vmks
+    app.kubernetes.io/managed-by: sync-job
+  name: vmks-rule-alertmanager-rules
+  namespace: monitoring
+spec:
+  groups:
+  - name: alertmanager.rules
+    rules:
+    - alert: AlertmanagerFailedReload
+      annotations:
+        description: Configuration has failed to load for {{ $labels.namespace }}/{{
+          $labels.pod}}.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/alertmanager/alertmanagerfailedreload
+        summary: Reloading an Alertmanager configuration has failed.
+      expr: max_over_time(alertmanager_config_last_reload_successful{job=~"vmalertmanager-.*",container="alertmanager",namespace="monitoring"}[5m])
+        == 0
+      for: 10m
+      labels:
+        severity: critical
+    - alert: AlertmanagerMembersInconsistent
+      annotations:
+        description: Alertmanager {{ $labels.namespace }}/{{ $labels.pod}} has only
+          found {{ $value }} members of the {{$labels.job}} cluster.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/alertmanager/alertmanagermembersinconsistent
+        summary: A member of an Alertmanager cluster has not found all other cluster
+          members.
+      expr: max_over_time(alertmanager_cluster_members{job=~"vmalertmanager-.*",container="alertmanager",namespace="monitoring"}[5m])
+        < on(namespace,service) group_left() count(max_over_time(alertmanager_cluster_members{job=~"vmalertmanager-.*",container="alertmanager",namespace="monitoring"}[5m]))
+        by(namespace,service)
+      for: 15m
+      labels:
+        severity: critical
+    - alert: AlertmanagerFailedToSendAlerts
+      annotations:
+        description: Alertmanager {{ $labels.namespace }}/{{ $labels.pod}} failed
+          to send {{ $value | humanizePercentage }} of notifications to {{ $labels.integration
+          }}.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/alertmanager/alertmanagerfailedtosendalerts
+        summary: An Alertmanager instance failed to send notifications.
+      expr: (rate(alertmanager_notifications_failed_total{job=~"vmalertmanager-.*",container="alertmanager",namespace="monitoring"}[15m])
+        / ignoring(reason) group_left() rate(alertmanager_notifications_total{job=~"vmalertmanager-.*",container="alertmanager",namespace="monitoring"}[15m]))
+        > 0.01
+      for: 5m
+      labels:
+        severity: warning
+    - alert: AlertmanagerClusterFailedToSendAlerts
+      annotations:
+        description: The minimum notification failure rate to {{ $labels.integration
+          }} sent from any instance in the {{$labels.job}} cluster is {{ $value |
+          humanizePercentage }}.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/alertmanager/alertmanagerclusterfailedtosendalerts
+        summary: All Alertmanager instances in a cluster failed to send notifications
+          to a critical integration.
+      expr: min((rate(alertmanager_notifications_failed_total{job=~"vmalertmanager-.*",container="alertmanager",namespace="monitoring",integration=~".*"}[15m])
+        / ignoring(reason) group_left() rate(alertmanager_notifications_total{job=~"vmalertmanager-.*",container="alertmanager",namespace="monitoring",integration=~".*"}[15m]))
+        > 0) by(namespace,service,integration) > 0.01
+      for: 5m
+      labels:
+        severity: critical
+    - alert: AlertmanagerClusterFailedToSendAlerts
+      annotations:
+        description: The minimum notification failure rate to {{ $labels.integration
+          }} sent from any instance in the {{$labels.job}} cluster is {{ $value |
+          humanizePercentage }}.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/alertmanager/alertmanagerclusterfailedtosendalerts
+        summary: All Alertmanager instances in a cluster failed to send notifications
+          to a non-critical integration.
+      expr: min((rate(alertmanager_notifications_failed_total{job=~"vmalertmanager-.*",container="alertmanager",namespace="monitoring",integration!~".*"}[15m])
+        / ignoring(reason) group_left() rate(alertmanager_notifications_total{job=~"vmalertmanager-.*",container="alertmanager",namespace="monitoring",integration!~".*"}[15m]))
+        > 0) by(namespace,service,integration) > 0.01
+      for: 5m
+      labels:
+        severity: warning
+    - alert: AlertmanagerConfigInconsistent
+      annotations:
+        description: Alertmanager instances within the {{$labels.job}} cluster have
+          different configurations.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/alertmanager/alertmanagerconfiginconsistent
+        summary: Alertmanager instances within the same cluster have different configurations.
+      expr: count(count_values("config_hash", alertmanager_config_hash{job=~"vmalertmanager-.*",container="alertmanager",namespace="monitoring"})
+        by(namespace,service)) by(namespace,service) != 1
+      for: 20m
+      labels:
+        severity: critical
+    - alert: AlertmanagerClusterDown
+      annotations:
+        description: '{{ $value | humanizePercentage }} of Alertmanager instances
+          within the {{$labels.job}} cluster have been up for less than half of the
+          last 5m.'
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/alertmanager/alertmanagerclusterdown
+        summary: Half or more of the Alertmanager instances within the same cluster
+          are down.
+      expr: (count(avg_over_time(up{job=~"vmalertmanager-.*",container="alertmanager",namespace="monitoring"}[5m])
+        < 0.5) by(namespace,service) / count(up{job=~"vmalertmanager-.*",container="alertmanager",namespace="monitoring"})
+        by(namespace,service)) >= 0.5
+      for: 5m
+      labels:
+        severity: critical
+    - alert: AlertmanagerClusterCrashlooping
+      annotations:
+        description: '{{ $value | humanizePercentage }} of Alertmanager instances
+          within the {{$labels.job}} cluster have restarted at least 5 times in the
+          last 10m.'
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/alertmanager/alertmanagerclustercrashlooping
+        summary: Half or more of the Alertmanager instances within the same cluster
+          are crashlooping.
+      expr: (count(changes(process_start_time_seconds{job=~"vmalertmanager-.*",container="alertmanager",namespace="monitoring"}[10m])
+        > 4) by(namespace,service) / count(up{job=~"vmalertmanager-.*",container="alertmanager",namespace="monitoring"})
+        by(namespace,service)) >= 0.5
+      for: 5m
+      labels:
+        severity: critical
+    - alert: AlertmanagerClusterFailedPeers
+      annotations:
+        description: Alertmanager {{ $labels.namespace }}/{{ $labels.pod}} has {{
+          $value }} failed peers in the {{$labels.job}} cluster.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/alertmanager/alertmanagerclusterfailedpeers
+        summary: An Alertmanager instance has failed peers in the cluster.
+      expr: max_over_time(alertmanager_cluster_failed_peers{job=~"vmalertmanager-.*",container="alertmanager",namespace="monitoring"}[5m])
+        > 0
+      for: 15m
+      labels:
+        severity: warning
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  labels:
+    app.kubernetes.io/instance: vmks
+    app.kubernetes.io/managed-by: sync-job
+  name: vmks-rule-etcd
+  namespace: monitoring
+spec:
+  groups:
+  - name: etcd
+    rules:
+    - alert: etcdMembersDown
+      annotations:
+        description: 'etcd cluster "{{ $labels.job }}": members are down ({{ $value
+          }}).'
+        summary: etcd cluster members are down.
+      expr: max(sum(up{job=~".*etcd.*"} ==bool 0) without(instance) or count(sum(rate(etcd_network_peer_sent_failures_total{job=~".*etcd.*"}[120s]))
+        without(instance) > 0.01) without(To)) without(endpoint) > 0
+      for: 20m
+      labels:
+        severity: warning
+    - alert: etcdInsufficientMembers
+      annotations:
+        description: 'etcd cluster "{{ $labels.job }}": insufficient members ({{ $value
+          }}).'
+        summary: etcd cluster has insufficient number of members.
+      expr: sum(up{job=~".*etcd.*"} ==bool 1) without(instance) < ((count(up{job=~".*etcd.*"})
+        without(instance) + 1) / 2)
+      for: 3m
+      labels:
+        severity: critical
+    - alert: etcdNoLeader
+      annotations:
+        description: 'etcd cluster "{{ $labels.job }}": member {{ $labels.instance
+          }} has no leader.'
+        summary: etcd cluster has no leader.
+      expr: etcd_server_has_leader{job=~".*etcd.*"} == 0
+      for: 1m
+      labels:
+        severity: critical
+    - alert: etcdHighNumberOfLeaderChanges
+      annotations:
+        description: 'etcd cluster "{{ $labels.job }}": {{ $value }} leader changes
+          within the last 15 minutes. Frequent elections may be a sign of insufficient
+          resources, high network latency, or disruptions by other components and
+          should be investigated.'
+        summary: etcd cluster has high number of leader changes.
+      expr: increase((max(etcd_server_leader_changes_seen_total{job=~".*etcd.*"})
+        without(instance) or (0 * absent(etcd_server_leader_changes_seen_total{job=~".*etcd.*"})))[15m:1m])
+        >= 4
+      for: 5m
+      labels:
+        severity: warning
+    - alert: etcdHighNumberOfFailedGRPCRequests
+      annotations:
+        description: 'etcd cluster "{{ $labels.job }}": {{ $value }}% of requests
+          for {{ $labels.grpc_method }} failed on etcd instance {{ $labels.instance
+          }}.'
+        summary: etcd cluster has high number of failed grpc requests.
+      expr: ((100 * sum(rate(grpc_server_handled_total{job=~".*etcd.*",grpc_code=~"Unknown|FailedPrecondition|ResourceExhausted|Internal|Unavailable|DataLoss|DeadlineExceeded"}[5m]))
+        without(grpc_type,grpc_code)) / sum(rate(grpc_server_handled_total{job=~".*etcd.*"}[5m]))
+        without(grpc_type,grpc_code)) > 1
+      for: 10m
+      labels:
+        severity: warning
+    - alert: etcdHighNumberOfFailedGRPCRequests
+      annotations:
+        description: 'etcd cluster "{{ $labels.job }}": {{ $value }}% of requests
+          for {{ $labels.grpc_method }} failed on etcd instance {{ $labels.instance
+          }}.'
+        summary: etcd cluster has high number of failed grpc requests.
+      expr: ((100 * sum(rate(grpc_server_handled_total{job=~".*etcd.*",grpc_code=~"Unknown|FailedPrecondition|ResourceExhausted|Internal|Unavailable|DataLoss|DeadlineExceeded"}[5m]))
+        without(grpc_type,grpc_code)) / sum(rate(grpc_server_handled_total{job=~".*etcd.*"}[5m]))
+        without(grpc_type,grpc_code)) > 5
+      for: 5m
+      labels:
+        severity: critical
+    - alert: etcdGRPCRequestsSlow
+      annotations:
+        description: 'etcd cluster "{{ $labels.job }}": 99th percentile of gRPC requests
+          is {{ $value }}s on etcd instance {{ $labels.instance }} for {{ $labels.grpc_method
+          }} method.'
+        summary: etcd grpc requests are slow
+      expr: histogram_quantile(0.99, sum(rate(grpc_server_handling_seconds_bucket{job=~".*etcd.*",grpc_method!="Defragment",grpc_type="unary"}[5m]))
+        without(grpc_type)) > 0.15
+      for: 10m
+      labels:
+        severity: critical
+    - alert: etcdMemberCommunicationSlow
+      annotations:
+        description: 'etcd cluster "{{ $labels.job }}": member communication with
+          {{ $labels.To }} is taking {{ $value }}s on etcd instance {{ $labels.instance
+          }}.'
+        summary: etcd cluster member communication is slow.
+      expr: histogram_quantile(0.99, rate(etcd_network_peer_round_trip_time_seconds_bucket{job=~".*etcd.*"}[5m]))
+        > 0.15
+      for: 10m
+      labels:
+        severity: warning
+    - alert: etcdHighNumberOfFailedProposals
+      annotations:
+        description: 'etcd cluster "{{ $labels.job }}": {{ $value }} proposal failures
+          within the last 15 minutes on etcd instance {{ $labels.instance }}.'
+        summary: etcd cluster has high number of proposal failures.
+      expr: rate(etcd_server_proposals_failed_total{job=~".*etcd.*"}[15m]) > 5
+      for: 15m
+      labels:
+        severity: warning
+    - alert: etcdHighFsyncDurations
+      annotations:
+        description: 'etcd cluster "{{ $labels.job }}": 99th percentile fsync durations
+          are {{ $value }}s on etcd instance {{ $labels.instance }}.'
+        summary: etcd cluster 99th percentile fsync durations are too high.
+      expr: histogram_quantile(0.99, rate(etcd_disk_wal_fsync_duration_seconds_bucket{job=~".*etcd.*"}[5m]))
+        > 0.5
+      for: 10m
+      labels:
+        severity: warning
+    - alert: etcdHighFsyncDurations
+      annotations:
+        description: 'etcd cluster "{{ $labels.job }}": 99th percentile fsync durations
+          are {{ $value }}s on etcd instance {{ $labels.instance }}.'
+        summary: etcd cluster 99th percentile fsync durations are too high.
+      expr: histogram_quantile(0.99, rate(etcd_disk_wal_fsync_duration_seconds_bucket{job=~".*etcd.*"}[5m]))
+        > 1
+      for: 10m
+      labels:
+        severity: critical
+    - alert: etcdHighCommitDurations
+      annotations:
+        description: 'etcd cluster "{{ $labels.job }}": 99th percentile commit durations
+          {{ $value }}s on etcd instance {{ $labels.instance }}.'
+        summary: etcd cluster 99th percentile commit durations are too high.
+      expr: histogram_quantile(0.99, rate(etcd_disk_backend_commit_duration_seconds_bucket{job=~".*etcd.*"}[5m]))
+        > 0.25
+      for: 10m
+      labels:
+        severity: warning
+    - alert: etcdDatabaseQuotaLowSpace
+      annotations:
+        description: 'etcd cluster "{{ $labels.job }}": database size exceeds the
+          defined quota on etcd instance {{ $labels.instance }}, please defrag or
+          increase the quota as the writes to etcd will be disabled when it is full.'
+        summary: etcd cluster database is running full.
+      expr: ((last_over_time(etcd_mvcc_db_total_size_in_bytes{job=~".*etcd.*"}[5m])
+        / last_over_time(etcd_server_quota_backend_bytes{job=~".*etcd.*"}[5m])) *
+        100) > 95
+      for: 10m
+      labels:
+        severity: critical
+    - alert: etcdExcessiveDatabaseGrowth
+      annotations:
+        description: 'etcd cluster "{{ $labels.job }}": Predicting running out of
+          disk space in the next four hours, based on write observations within the
+          past four hours on etcd instance {{ $labels.instance }}, please check as
+          it might be disruptive.'
+        summary: etcd cluster database growing very fast.
+      expr: predict_linear(etcd_mvcc_db_total_size_in_bytes{job=~".*etcd.*"}[4h],
+        14400) > etcd_server_quota_backend_bytes{job=~".*etcd.*"}
+      for: 10m
+      labels:
+        severity: warning
+    - alert: etcdDatabaseHighFragmentationRatio
+      annotations:
+        description: 'etcd cluster "{{ $labels.job }}": database size in use on instance
+          {{ $labels.instance }} is {{ $value | humanizePercentage }} of the actual
+          allocated disk space, please run defragmentation (e.g. etcdctl defrag) to
+          retrieve the unused fragmented disk space.'
+        runbook_url: https://etcd.io/docs/v3.5/op-guide/maintenance/#defragmentation
+        summary: etcd database size in use is less than 50% of the actual allocated
+          storage.
+      expr: ((last_over_time(etcd_mvcc_db_total_size_in_use_in_bytes{job=~".*etcd.*"}[5m])
+        / last_over_time(etcd_mvcc_db_total_size_in_bytes{job=~".*etcd.*"}[5m])) <
+        0.5) and (etcd_mvcc_db_total_size_in_use_in_bytes{job=~".*etcd.*"} > 104857600)
+      for: 10m
+      labels:
+        severity: warning
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  labels:
+    app.kubernetes.io/instance: vmks
+    app.kubernetes.io/managed-by: sync-job
+  name: vmks-rule-kube-state-metrics
+  namespace: monitoring
+spec:
+  groups:
+  - name: kube-state-metrics
+    rules:
+    - alert: KubeStateMetricsListErrors
+      annotations:
+        description: kube-state-metrics is experiencing errors at an elevated rate
+          in list operations. This is likely causing it to not be able to expose metrics
+          about Kubernetes objects correctly or at all.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kube-state-metrics/kubestatemetricslisterrors
+        summary: kube-state-metrics is experiencing errors in list operations.
+      expr: (sum(rate(kube_state_metrics_list_total{job="kube-state-metrics",result="error"}[5m]))
+        by(cluster) / sum(rate(kube_state_metrics_list_total{job="kube-state-metrics"}[5m]))
+        by(cluster)) > 0.01
+      for: 15m
+      labels:
+        severity: critical
+    - alert: KubeStateMetricsWatchErrors
+      annotations:
+        description: kube-state-metrics is experiencing errors at an elevated rate
+          in watch operations. This is likely causing it to not be able to expose
+          metrics about Kubernetes objects correctly or at all.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kube-state-metrics/kubestatemetricswatcherrors
+        summary: kube-state-metrics is experiencing errors in watch operations.
+      expr: (sum(rate(kube_state_metrics_watch_total{job="kube-state-metrics",result="error"}[5m]))
+        by(cluster) / sum(rate(kube_state_metrics_watch_total{job="kube-state-metrics"}[5m]))
+        by(cluster)) > 0.01
+      for: 15m
+      labels:
+        severity: critical
+    - alert: KubeStateMetricsShardingMismatch
+      annotations:
+        description: kube-state-metrics pods are running with different --total-shards
+          configuration, some Kubernetes objects may be exposed multiple times or
+          not exposed at all.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kube-state-metrics/kubestatemetricsshardingmismatch
+        summary: kube-state-metrics sharding is misconfigured.
+      expr: stdvar(kube_state_metrics_total_shards{job="kube-state-metrics"}) by(cluster)
+        != 0
+      for: 15m
+      labels:
+        severity: critical
+    - alert: KubeStateMetricsShardsMissing
+      annotations:
+        description: kube-state-metrics shards are missing, some Kubernetes objects
+          are not being exposed.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kube-state-metrics/kubestatemetricsshardsmissing
+        summary: kube-state-metrics shards are missing.
+      expr: (((2 ^ max(kube_state_metrics_total_shards{job="kube-state-metrics"})
+        by(cluster)) - 1) - sum(2 ^ max(kube_state_metrics_shard_ordinal{job="kube-state-metrics"})
+        by(cluster,shard_ordinal)) by(cluster)) != 0
+      for: 15m
+      labels:
+        severity: critical
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  labels:
+    app.kubernetes.io/instance: vmks
+    app.kubernetes.io/managed-by: sync-job
+  name: vmks-rule-general-rules
+  namespace: monitoring
+spec:
+  groups:
+  - name: general.rules
+    rules:
+    - alert: TargetDown
+      annotations:
+        description: '{{ printf "%.4g" $value }}% of the {{ $labels.job }}/{{ $labels.service
+          }} targets in {{ $labels.namespace }} namespace are down.'
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/general/targetdown
+        summary: One or more targets are unreachable.
+      expr: (100 * (count(up == 0) by(cluster,job,namespace,service) / count(up) by(cluster,job,namespace,service)))
+        > 10
+      for: 10m
+      labels:
+        severity: warning
+    - alert: Watchdog
+      annotations:
+        description: 'This is an alert meant to ensure that the entire alerting pipeline
+          is functional.
+
+          This alert is always firing, therefore it should always be firing in Alertmanager
+
+          and always fire against a receiver. There are integrations with various
+          notification
+
+          mechanisms that send a notification when this alert is not firing. For example
+          the
+
+          "DeadMansSnitch" integration in PagerDuty.
+
+          '
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/general/watchdog
+        summary: An alert that should always be firing to certify that Alertmanager
+          is working properly.
+      expr: vector(1)
+      labels:
+        severity: none
+    - alert: InfoInhibitor
+      annotations:
+        description: 'This is an alert that is used to inhibit info alerts.
+
+          By themselves, the info-level alerts are sometimes very noisy, but they
+          are relevant when combined with
+
+          other alerts.
+
+          This alert fires whenever there''s a severity="info" alert, and stops firing
+          when another alert with a
+
+          severity of ''warning'' or ''critical'' starts firing on the same namespace.
+
+          This alert should be routed to a null receiver and configured to inhibit
+          alerts with severity="info".
+
+          '
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/general/infoinhibitor
+        summary: Info-level alert inhibition.
+      expr: group(ALERTS{severity="info"} == 1) by(namespace) unless on(namespace)
+        group(ALERTS{alertname!="InfoInhibitor",alertstate="firing",severity=~"warning|critical"}
+        == 1) by(namespace)
+      labels:
+        severity: none
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  labels:
+    app.kubernetes.io/instance: vmks
+    app.kubernetes.io/managed-by: sync-job
+  name: vmks-rule-node-network
+  namespace: monitoring
+spec:
+  groups:
+  - name: node-network
+    rules:
+    - alert: NodeNetworkInterfaceFlapping
+      annotations:
+        description: Network interface "{{ $labels.device }}" changing its up status
+          often on node-exporter {{ $labels.namespace }}/{{ $labels.pod }}
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/general/nodenetworkinterfaceflapping
+        summary: Network interface is often changing its status
+      expr: changes(node_network_up{job="node-exporter",device!~"veth.+"}[2m]) > 2
+      for: 2m
+      labels:
+        severity: warning
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  labels:
+    app.kubernetes.io/instance: vmks
+    app.kubernetes.io/managed-by: sync-job
+  name: vmks-rule-kube-prometheus-node-recording-rules
+  namespace: monitoring
+spec:
+  groups:
+  - name: kube-prometheus-node-recording.rules
+    rules:
+    - expr: sum(rate(node_cpu_seconds_total{mode!="idle",mode!="iowait",mode!="steal"}[3m]))
+        by(instance)
+      record: instance:node_cpu:rate:sum
+    - expr: sum(rate(node_network_receive_bytes_total[3m])) by(instance)
+      record: instance:node_network_receive_bytes:rate:sum
+    - expr: sum(rate(node_network_transmit_bytes_total[3m])) by(instance)
+      record: instance:node_network_transmit_bytes:rate:sum
+    - expr: sum(rate(node_cpu_seconds_total{mode!="idle",mode!="iowait",mode!="steal"}[5m]))
+        without(cpu,mode) / on(instance) group_left() count(sum(node_cpu_seconds_total)
+        by(instance,cpu)) by(instance)
+      record: instance:node_cpu:ratio
+    - expr: sum(rate(node_cpu_seconds_total{mode!="idle",mode!="iowait",mode!="steal"}[5m]))
+      record: cluster:node_cpu:sum_rate5m
+    - expr: cluster:node_cpu:sum_rate5m / count(sum(node_cpu_seconds_total) by(instance,cpu))
+      record: cluster:node_cpu:ratio
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  labels:
+    app.kubernetes.io/instance: vmks
+    app.kubernetes.io/managed-by: sync-job
+  name: vmks-rule-kubernetes-apps
+  namespace: monitoring
+spec:
+  groups:
+  - name: kubernetes-apps
+    rules:
+    - alert: KubePodCrashLooping
+      annotations:
+        description: 'Pod {{ $labels.namespace }}/{{ $labels.pod }} ({{ $labels.container
+          }}) is in waiting state (reason: "CrashLoopBackOff") on cluster {{ $labels.cluster
+          }}.'
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubepodcrashlooping
+        summary: Pod is crash looping.
+      expr: max_over_time(kube_pod_container_status_waiting_reason{reason="CrashLoopBackOff",job="kube-state-metrics",namespace=~".*"}[5m])
+        >= 1
+      for: 15m
+      labels:
+        severity: warning
+    - alert: KubePodNotReady
+      annotations:
+        description: Pod {{ $labels.namespace }}/{{ $labels.pod }} has been in a non-ready
+          state for longer than 15 minutes on cluster {{ $labels.cluster }}.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubepodnotready
+        summary: Pod has been in a non-ready state for more than 15 minutes.
+      expr: (sum(max(kube_pod_status_phase{job="kube-state-metrics",phase=~"Pending|Unknown",namespace=~".*"}
+        or ((kube_pod_status_phase{job="kube-state-metrics",phase="Running",namespace=~".*"}
+        == 1) and on(namespace,pod,cluster) (kube_pod_status_ready{job="kube-state-metrics",condition="true",namespace=~".*"}
+        == 0))) by(namespace,pod,job,cluster) * on(namespace,pod,cluster) group_left()
+        topk(1, max(kube_pod_owner{owner_kind!="Job"}) by(namespace,pod,owner_kind,cluster))
+        by(namespace,pod,cluster)) by(namespace,pod,job,cluster) > 0) unless on(namespace,pod,cluster)
+        (kube_pod_status_reason{job="kube-state-metrics",reason="SchedulingGated",namespace=~".*"}
+        == 1)
+      for: 15m
+      labels:
+        severity: warning
+    - alert: KubeDeploymentGenerationMismatch
+      annotations:
+        description: Deployment generation for {{ $labels.namespace }}/{{ $labels.deployment
+          }} does not match, this indicates that the Deployment has failed but has
+          not been rolled back on cluster {{ $labels.cluster }}.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubedeploymentgenerationmismatch
+        summary: Deployment generation mismatch due to possible roll-back
+      expr: kube_deployment_status_observed_generation{job="kube-state-metrics",namespace=~".*"}
+        != kube_deployment_metadata_generation{job="kube-state-metrics",namespace=~".*"}
+      for: 15m
+      labels:
+        severity: warning
+    - alert: KubeDeploymentReplicasMismatch
+      annotations:
+        description: Deployment {{ $labels.namespace }}/{{ $labels.deployment }} has
+          not matched the expected number of replicas for longer than 15 minutes on
+          cluster {{ $labels.cluster }}.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubedeploymentreplicasmismatch
+        summary: Deployment has not matched the expected number of replicas.
+      expr: (kube_deployment_spec_replicas{job="kube-state-metrics",namespace=~".*"}
+        > kube_deployment_status_replicas_available{job="kube-state-metrics",namespace=~".*"})
+        and (changes(kube_deployment_status_replicas_updated{job="kube-state-metrics",namespace=~".*"}[10m])
+        == 0)
+      for: 15m
+      labels:
+        severity: warning
+    - alert: KubeDeploymentRolloutStuck
+      annotations:
+        description: Rollout of deployment {{ $labels.namespace }}/{{ $labels.deployment
+          }} is not progressing for longer than 15 minutes on cluster {{ $labels.cluster
+          }}.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubedeploymentrolloutstuck
+        summary: Deployment rollout is not progressing.
+      expr: kube_deployment_status_condition{condition="Progressing",status="false",job="kube-state-metrics",namespace=~".*"}
+        != 0
+      for: 15m
+      labels:
+        severity: warning
+    - alert: KubeStatefulSetReplicasMismatch
+      annotations:
+        description: StatefulSet {{ $labels.namespace }}/{{ $labels.statefulset }}
+          has not matched the expected number of replicas for longer than 15 minutes
+          on cluster {{ $labels.cluster }}.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubestatefulsetreplicasmismatch
+        summary: StatefulSet has not matched the expected number of replicas.
+      expr: (kube_statefulset_status_replicas_ready{job="kube-state-metrics",namespace=~".*"}
+        != kube_statefulset_replicas{job="kube-state-metrics",namespace=~".*"}) and
+        (changes(kube_statefulset_status_replicas_updated{job="kube-state-metrics",namespace=~".*"}[10m])
+        == 0)
+      for: 15m
+      labels:
+        severity: warning
+    - alert: KubeStatefulSetGenerationMismatch
+      annotations:
+        description: StatefulSet generation for {{ $labels.namespace }}/{{ $labels.statefulset
+          }} does not match, this indicates that the StatefulSet has failed but has
+          not been rolled back on cluster {{ $labels.cluster }}.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubestatefulsetgenerationmismatch
+        summary: StatefulSet generation mismatch due to possible roll-back
+      expr: kube_statefulset_status_observed_generation{job="kube-state-metrics",namespace=~".*"}
+        != kube_statefulset_metadata_generation{job="kube-state-metrics",namespace=~".*"}
+      for: 15m
+      labels:
+        severity: warning
+    - alert: KubeStatefulSetUpdateNotRolledOut
+      annotations:
+        description: StatefulSet {{ $labels.namespace }}/{{ $labels.statefulset }}
+          update has not been rolled out on cluster {{ $labels.cluster }}.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubestatefulsetupdatenotrolledout
+        summary: StatefulSet update has not been rolled out.
+      expr: (max(kube_statefulset_status_current_revision{job="kube-state-metrics",namespace=~".*"}
+        unless kube_statefulset_status_update_revision{job="kube-state-metrics",namespace=~".*"})
+        by(namespace,statefulset,job,cluster) * on(namespace,statefulset,job,cluster)
+        (kube_statefulset_replicas{job="kube-state-metrics",namespace=~".*"} != kube_statefulset_status_replicas_updated{job="kube-state-metrics",namespace=~".*"}))
+        and on(namespace,statefulset,job,cluster) (changes(kube_statefulset_status_replicas_updated{job="kube-state-metrics",namespace=~".*"}[5m])
+        == 0)
+      for: 15m
+      labels:
+        severity: warning
+    - alert: KubeDaemonSetRolloutStuck
+      annotations:
+        description: DaemonSet {{ $labels.namespace }}/{{ $labels.daemonset }} has
+          not finished or progressed for at least 15m on cluster {{ $labels.cluster
+          }}.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubedaemonsetrolloutstuck
+        summary: DaemonSet rollout is stuck.
+      expr: ((((kube_daemonset_status_current_number_scheduled{job="kube-state-metrics",namespace=~".*"}
+        != kube_daemonset_status_desired_number_scheduled{job="kube-state-metrics",namespace=~".*"})
+        or (kube_daemonset_status_number_misscheduled{job="kube-state-metrics",namespace=~".*"}
+        != 0)) or (kube_daemonset_status_updated_number_scheduled{job="kube-state-metrics",namespace=~".*"}
+        != kube_daemonset_status_desired_number_scheduled{job="kube-state-metrics",namespace=~".*"}))
+        or (kube_daemonset_status_number_available{job="kube-state-metrics",namespace=~".*"}
+        != kube_daemonset_status_desired_number_scheduled{job="kube-state-metrics",namespace=~".*"}))
+        and (changes(kube_daemonset_status_updated_number_scheduled{job="kube-state-metrics",namespace=~".*"}[5m])
+        == 0)
+      for: 15m
+      labels:
+        severity: warning
+    - alert: KubeContainerWaiting
+      annotations:
+        description: 'pod/{{ $labels.pod }} in namespace {{ $labels.namespace }} on
+          container {{ $labels.container}} has been in waiting state for longer than
+          1 hour. (reason: "{{ $labels.reason }}") on cluster {{ $labels.cluster }}.'
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubecontainerwaiting
+        summary: Pod container waiting longer than 1 hour
+      expr: kube_pod_container_status_waiting_reason{reason!="CrashLoopBackOff",job="kube-state-metrics",namespace=~".*"}
+        > 0
+      for: 1h
+      labels:
+        severity: warning
+    - alert: KubeDaemonSetNotScheduled
+      annotations:
+        description: '{{ $value }} Pods of DaemonSet {{ $labels.namespace }}/{{ $labels.daemonset
+          }} are not scheduled on cluster {{ $labels.cluster }}.'
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubedaemonsetnotscheduled
+        summary: DaemonSet pods are not scheduled.
+      expr: (kube_daemonset_status_desired_number_scheduled{job="kube-state-metrics",namespace=~".*"}
+        - kube_daemonset_status_current_number_scheduled{job="kube-state-metrics",namespace=~".*"})
+        > 0
+      for: 10m
+      labels:
+        severity: warning
+    - alert: KubeDaemonSetMisScheduled
+      annotations:
+        description: '{{ $value }} Pods of DaemonSet {{ $labels.namespace }}/{{ $labels.daemonset
+          }} are running where they are not supposed to run on cluster {{ $labels.cluster
+          }}.'
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubedaemonsetmisscheduled
+        summary: DaemonSet pods are misscheduled.
+      expr: kube_daemonset_status_number_misscheduled{job="kube-state-metrics",namespace=~".*"}
+        > 0
+      for: 15m
+      labels:
+        severity: warning
+    - alert: KubeJobNotCompleted
+      annotations:
+        description: Job {{ $labels.namespace }}/{{ $labels.job_name }} is taking
+          more than {{ "43200" | humanizeDuration }} to complete on cluster {{ $labels.cluster
+          }}.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubejobnotcompleted
+        summary: Job did not complete in time
+      expr: ((time() - max(kube_job_status_start_time{job="kube-state-metrics",namespace=~".*"}
+        and (kube_job_status_active{job="kube-state-metrics",namespace=~".*"} > 0))
+        by(namespace,job_name,cluster)) > 43200) unless on(namespace,job_name,cluster)
+        max(kube_job_labels{job="kube-state-metrics",label_excluded_from_alerts="true",namespace=~".*"}
+        == 1) by(namespace,job_name,cluster)
+      labels:
+        severity: warning
+    - alert: KubeJobFailed
+      annotations:
+        description: Job {{ $labels.namespace }}/{{ $labels.job_name }} failed to
+          complete. Removing failed job after investigation should clear this alert
+          on cluster {{ $labels.cluster }}.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubejobfailed
+        summary: Job failed to complete.
+      expr: kube_job_failed{job="kube-state-metrics",namespace=~".*"} > 0
+      for: 15m
+      labels:
+        severity: warning
+    - alert: KubeHpaReplicasMismatch
+      annotations:
+        description: HPA {{ $labels.namespace }}/{{ $labels.horizontalpodautoscaler  }}
+          has not matched the desired number of replicas for longer than 15 minutes
+          on cluster {{ $labels.cluster }}.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubehpareplicasmismatch
+        summary: HPA has not matched desired number of replicas.
+      expr: (((kube_horizontalpodautoscaler_status_desired_replicas{job="kube-state-metrics",namespace=~".*"}
+        != kube_horizontalpodautoscaler_status_current_replicas{job="kube-state-metrics",namespace=~".*"})
+        and (kube_horizontalpodautoscaler_status_current_replicas{job="kube-state-metrics",namespace=~".*"}
+        > kube_horizontalpodautoscaler_spec_min_replicas{job="kube-state-metrics",namespace=~".*"}))
+        and (kube_horizontalpodautoscaler_status_current_replicas{job="kube-state-metrics",namespace=~".*"}
+        < kube_horizontalpodautoscaler_spec_max_replicas{job="kube-state-metrics",namespace=~".*"}))
+        and (changes(kube_horizontalpodautoscaler_status_current_replicas{job="kube-state-metrics",namespace=~".*"}[15m])
+        == 0)
+      for: 15m
+      labels:
+        severity: warning
+    - alert: KubeHpaMaxedOut
+      annotations:
+        description: HPA {{ $labels.namespace }}/{{ $labels.horizontalpodautoscaler  }}
+          has been running at max replicas for longer than 15 minutes on cluster {{
+          $labels.cluster }}.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubehpamaxedout
+        summary: HPA is running at max replicas
+      expr: (kube_horizontalpodautoscaler_status_current_replicas{job="kube-state-metrics",namespace=~".*"}
+        == kube_horizontalpodautoscaler_spec_max_replicas{job="kube-state-metrics",namespace=~".*"})
+        and on(namespace,horizontalpodautoscaler,cluster) (kube_horizontalpodautoscaler_spec_max_replicas{job="kube-state-metrics",namespace=~".*"}
+        != kube_horizontalpodautoscaler_spec_min_replicas{job="kube-state-metrics",namespace=~".*"})
+      for: 15m
+      labels:
+        severity: warning
+    - alert: KubePdbNotEnoughHealthyPods
+      annotations:
+        description: PDB {{ $labels.cluster }}/{{ $labels.namespace }}/{{ $labels.poddisruptionbudget
+          }} expects {{ $value }} more healthy pods. The desired number of healthy
+          pods has not been met for at least 15m.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubepdbnotenoughhealthypods
+        summary: PDB does not have enough healthy pods.
+      expr: ((kube_poddisruptionbudget_status_desired_healthy{job="kube-state-metrics",namespace=~".*"}
+        - kube_poddisruptionbudget_status_current_healthy{job="kube-state-metrics",namespace=~".*"})
+        > 0) and (kube_poddisruptionbudget_status_expected_pods{job="kube-state-metrics",namespace=~".*"}
+        > 0)
+      for: 15m
+      labels:
+        severity: warning
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  labels:
+    app.kubernetes.io/instance: vmks
+    app.kubernetes.io/managed-by: sync-job
+  name: vmks-rule-kubernetes-resources
+  namespace: monitoring
+spec:
+  groups:
+  - name: kubernetes-resources
+    rules:
+    - alert: KubeCPUOvercommit
+      annotations:
+        description: Cluster {{ $labels.cluster }} has overcommitted CPU resource
+          requests for Pods by {{ printf "%.2f" $value }} CPU shares and cannot tolerate
+          node failure.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubecpuovercommit
+        summary: Cluster has overcommitted CPU resource requests.
+      expr: (((sum(namespace_cpu:kube_pod_container_resource_requests:sum) by(cluster)
+        - sum(kube_node_status_allocatable{job="kube-state-metrics",resource="cpu"})
+        by(cluster)) > 0) and (count(max(kube_node_role{job="kube-state-metrics",role="control-plane"})
+        by(cluster,node)) by(cluster) < 3)) or ((sum(namespace_cpu:kube_pod_container_resource_requests:sum)
+        by(cluster) - ((sum(kube_node_status_allocatable{job="kube-state-metrics",resource="cpu"})
+        by(cluster) - max(kube_node_status_allocatable{job="kube-state-metrics",resource="cpu"})
+        by(cluster)) > 0)) > 0)
+      for: 10m
+      labels:
+        severity: warning
+    - alert: KubeMemoryOvercommit
+      annotations:
+        description: Cluster {{ $labels.cluster }} has overcommitted memory resource
+          requests for Pods by {{ $value | humanize }} bytes and cannot tolerate node
+          failure.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubememoryovercommit
+        summary: Cluster has overcommitted memory resource requests.
+      expr: (((sum(namespace_memory:kube_pod_container_resource_requests:sum) by(cluster)
+        - sum(kube_node_status_allocatable{job="kube-state-metrics",resource="memory"})
+        by(cluster)) > 0) and (count(max(kube_node_role{job="kube-state-metrics",role="control-plane"})
+        by(cluster,node)) by(cluster) < 3)) or ((sum(namespace_memory:kube_pod_container_resource_requests:sum)
+        by(cluster) - ((sum(kube_node_status_allocatable{job="kube-state-metrics",resource="memory"})
+        by(cluster) - max(kube_node_status_allocatable{job="kube-state-metrics",resource="memory"})
+        by(cluster)) > 0)) > 0)
+      for: 10m
+      labels:
+        severity: warning
+    - alert: KubeCPUQuotaOvercommit
+      annotations:
+        description: Cluster {{ $labels.cluster }} has overcommitted CPU resource
+          requests for Namespaces.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubecpuquotaovercommit
+        summary: Cluster has overcommitted CPU resource requests.
+      expr: (sum(min(kube_resourcequota{job="kube-state-metrics",type="hard",resource=~"(cpu|requests.cpu)"})
+        without(resource)) by(cluster) / sum(kube_node_status_allocatable{resource="cpu",job="kube-state-metrics"})
+        by(cluster)) > 1.5
+      for: 5m
+      labels:
+        severity: warning
+    - alert: KubeMemoryQuotaOvercommit
+      annotations:
+        description: Cluster {{ $labels.cluster }} has overcommitted memory resource
+          requests for Namespaces.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubememoryquotaovercommit
+        summary: Cluster has overcommitted memory resource requests.
+      expr: (sum(min(kube_resourcequota{job="kube-state-metrics",type="hard",resource=~"(memory|requests.memory)"})
+        without(resource)) by(cluster) / sum(kube_node_status_allocatable{resource="memory",job="kube-state-metrics"})
+        by(cluster)) > 1.5
+      for: 5m
+      labels:
+        severity: warning
+    - alert: KubeQuotaAlmostFull
+      annotations:
+        description: Namespace {{ $labels.namespace }} is using {{ $value | humanizePercentage
+          }} of its {{ $labels.resource }} quota on cluster {{ $labels.cluster }}.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubequotaalmostfull
+        summary: Namespace quota is going to be full.
+      expr: ((topk(1, max(kube_resourcequota{job="kube-state-metrics",type="used"})
+        without(instance,job,type)) by(cluster,namespace,resource,resourcequota) /
+        on(cluster,namespace,resource,resourcequota) group_left() topk(1, max(kube_resourcequota{job="kube-state-metrics",type="hard"})
+        without(instance,job,type) > 0) by(cluster,namespace,resource,resourcequota))
+        > 0.9) < 1
+      for: 15m
+      labels:
+        severity: info
+    - alert: KubeQuotaFullyUsed
+      annotations:
+        description: Namespace {{ $labels.namespace }} is using {{ $value | humanizePercentage
+          }} of its {{ $labels.resource }} quota on cluster {{ $labels.cluster }}.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubequotafullyused
+        summary: Namespace quota is fully used.
+      expr: (topk(1, max(kube_resourcequota{job="kube-state-metrics",type="used"})
+        without(instance,job,type)) by(cluster,namespace,resource,resourcequota) /
+        on(cluster,namespace,resource,resourcequota) group_left() topk(1, max(kube_resourcequota{job="kube-state-metrics",type="hard"})
+        without(instance,job,type) > 0) by(cluster,namespace,resource,resourcequota))
+        == 1
+      for: 15m
+      labels:
+        severity: info
+    - alert: KubeQuotaExceeded
+      annotations:
+        description: Namespace {{ $labels.namespace }} is using {{ $value | humanizePercentage
+          }} of its {{ $labels.resource }} quota on cluster {{ $labels.cluster }}.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubequotaexceeded
+        summary: Namespace quota has exceeded the limits.
+      expr: (topk(1, max(kube_resourcequota{job="kube-state-metrics",type="used"})
+        without(instance,job,type)) by(cluster,namespace,resource,resourcequota) /
+        on(cluster,namespace,resource,resourcequota) group_left() topk(1, max(kube_resourcequota{job="kube-state-metrics",type="hard"})
+        without(instance,job,type) > 0) by(cluster,namespace,resource,resourcequota))
+        > 1
+      for: 15m
+      labels:
+        severity: warning
+    - alert: CPUThrottlingHigh
+      annotations:
+        description: '{{ $value | humanizePercentage }} throttling of CPU in namespace
+          {{ $labels.namespace }} for container {{ $labels.container }} in pod {{
+          $labels.pod }} on cluster {{ $labels.cluster }}.'
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/cputhrottlinghigh
+        summary: Processes experience elevated CPU throttling.
+      expr: (sum(topk(1, increase(container_cpu_cfs_throttled_periods_total{container!="",job="kubelet",metrics_path="/metrics/cadvisor"}[5m]))
+        by(cluster,namespace,pod,container,instance)) without(id,metrics_path,name,image,endpoint,job,node)
+        / on(cluster,namespace,pod,container,instance) group_left() sum(topk(1, increase(container_cpu_cfs_periods_total{job="kubelet",metrics_path="/metrics/cadvisor"}[5m]))
+        by(cluster,namespace,pod,container,instance)) without(id,metrics_path,name,image,endpoint,job,node))
+        > 0.25
+      for: 15m
+      labels:
+        severity: info
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  labels:
+    app.kubernetes.io/instance: vmks
+    app.kubernetes.io/managed-by: sync-job
+  name: vmks-rule-kubernetes-storage
+  namespace: monitoring
+spec:
+  groups:
+  - name: kubernetes-storage
+    rules:
+    - alert: KubePersistentVolumeFillingUp
+      annotations:
+        description: The PersistentVolume claimed by {{ $labels.persistentvolumeclaim
+          }} in Namespace {{ $labels.namespace }} {{ with $labels.cluster -}} on Cluster
+          {{ . }} {{- end }} is only {{ $value | humanizePercentage }} free.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubepersistentvolumefillingup
+        summary: PersistentVolume is filling up.
+      expr: ((((kubelet_volume_stats_available_bytes{job="kubelet",metrics_path="/metrics",namespace=~".*"}
+        / kubelet_volume_stats_capacity_bytes{job="kubelet",metrics_path="/metrics",namespace=~".*"})
+        < 0.03) and (kubelet_volume_stats_used_bytes{job="kubelet",metrics_path="/metrics",namespace=~".*"}
+        > 0)) unless on(cluster,namespace,persistentvolumeclaim) (kube_persistentvolumeclaim_access_mode{access_mode="ReadOnlyMany"}
+        == 1)) unless on(cluster,namespace,persistentvolumeclaim) (kube_persistentvolumeclaim_labels{label_excluded_from_alerts="true"}
+        == 1)
+      for: 1m
+      labels:
+        severity: critical
+    - alert: KubePersistentVolumeFillingUp
+      annotations:
+        description: Based on recent sampling, the PersistentVolume claimed by {{
+          $labels.persistentvolumeclaim }} in Namespace {{ $labels.namespace }} {{
+          with $labels.cluster -}} on Cluster {{ . }} {{- end }} is expected to fill
+          up within four days. Currently {{ $value | humanizePercentage }} is available.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubepersistentvolumefillingup
+        summary: PersistentVolume is filling up.
+      expr: (((((kubelet_volume_stats_available_bytes{job="kubelet",metrics_path="/metrics",namespace=~".*"}
+        / kubelet_volume_stats_capacity_bytes{job="kubelet",metrics_path="/metrics",namespace=~".*"})
+        < 0.15) and (kubelet_volume_stats_used_bytes{job="kubelet",metrics_path="/metrics",namespace=~".*"}
+        > 0)) and (predict_linear(kubelet_volume_stats_available_bytes{job="kubelet",metrics_path="/metrics",namespace=~".*"}[6h],
+        345600) < 0)) unless on(cluster,namespace,persistentvolumeclaim) (kube_persistentvolumeclaim_access_mode{access_mode="ReadOnlyMany"}
+        == 1)) unless on(cluster,namespace,persistentvolumeclaim) (kube_persistentvolumeclaim_labels{label_excluded_from_alerts="true"}
+        == 1)
+      for: 1h
+      labels:
+        severity: warning
+    - alert: KubePersistentVolumeInodesFillingUp
+      annotations:
+        description: The PersistentVolume claimed by {{ $labels.persistentvolumeclaim
+          }} in Namespace {{ $labels.namespace }} {{ with $labels.cluster -}} on Cluster
+          {{ . }} {{- end }} only has {{ $value | humanizePercentage }} free inodes.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubepersistentvolumeinodesfillingup
+        summary: PersistentVolumeInodes are filling up.
+      expr: ((((kubelet_volume_stats_inodes_free{job="kubelet",metrics_path="/metrics",namespace=~".*"}
+        / kubelet_volume_stats_inodes{job="kubelet",metrics_path="/metrics",namespace=~".*"})
+        < 0.03) and (kubelet_volume_stats_inodes_used{job="kubelet",metrics_path="/metrics",namespace=~".*"}
+        > 0)) unless on(cluster,namespace,persistentvolumeclaim) (kube_persistentvolumeclaim_access_mode{access_mode="ReadOnlyMany"}
+        == 1)) unless on(cluster,namespace,persistentvolumeclaim) (kube_persistentvolumeclaim_labels{label_excluded_from_alerts="true"}
+        == 1)
+      for: 1m
+      labels:
+        severity: critical
+    - alert: KubePersistentVolumeInodesFillingUp
+      annotations:
+        description: Based on recent sampling, the PersistentVolume claimed by {{
+          $labels.persistentvolumeclaim }} in Namespace {{ $labels.namespace }} {{
+          with $labels.cluster -}} on Cluster {{ . }} {{- end }} is expected to run
+          out of inodes within four days. Currently {{ $value | humanizePercentage
+          }} of its inodes are free.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubepersistentvolumeinodesfillingup
+        summary: PersistentVolumeInodes are filling up.
+      expr: (((((kubelet_volume_stats_inodes_free{job="kubelet",metrics_path="/metrics",namespace=~".*"}
+        / kubelet_volume_stats_inodes{job="kubelet",metrics_path="/metrics",namespace=~".*"})
+        < 0.15) and (kubelet_volume_stats_inodes_used{job="kubelet",metrics_path="/metrics",namespace=~".*"}
+        > 0)) and (predict_linear(kubelet_volume_stats_inodes_free{job="kubelet",metrics_path="/metrics",namespace=~".*"}[6h],
+        345600) < 0)) unless on(cluster,namespace,persistentvolumeclaim) (kube_persistentvolumeclaim_access_mode{access_mode="ReadOnlyMany"}
+        == 1)) unless on(cluster,namespace,persistentvolumeclaim) (kube_persistentvolumeclaim_labels{label_excluded_from_alerts="true"}
+        == 1)
+      for: 1h
+      labels:
+        severity: warning
+    - alert: KubePersistentVolumeErrors
+      annotations:
+        description: The persistent volume {{ $labels.persistentvolume }} {{ with
+          $labels.cluster -}} on Cluster {{ . }} {{- end }} has status {{ $labels.phase
+          }}.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubepersistentvolumeerrors
+        summary: PersistentVolume is having issues with provisioning.
+      expr: kube_persistentvolume_status_phase{phase=~"Failed|Pending",job="kube-state-metrics"}
+        > 0
+      for: 5m
+      labels:
+        severity: critical
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  labels:
+    app.kubernetes.io/instance: vmks
+    app.kubernetes.io/managed-by: sync-job
+  name: vmks-rule-kubernetes-system
+  namespace: monitoring
+spec:
+  groups:
+  - name: kubernetes-system
+    rules:
+    - alert: KubeVersionMismatch
+      annotations:
+        description: There are {{ $value }} different semantic versions of Kubernetes
+          components running on cluster {{ $labels.cluster }}.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubeversionmismatch
+        summary: Different semantic versions of Kubernetes components running.
+      expr: count(count(label_replace(kubernetes_build_info{job!~"kube-dns|coredns"},
+        "git_version", "$1", "git_version", "(v[0-9]*.[0-9]*).*")) by(git_version,cluster))
+        by(cluster) > 1
+      for: 15m
+      labels:
+        severity: warning
+    - alert: KubeClientErrors
+      annotations:
+        description: Kubernetes API server client '{{ $labels.job }}/{{ $labels.instance
+          }}' is experiencing {{ $value | humanizePercentage }} errors on cluster
+          {{ $labels.cluster }}.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubeclienterrors
+        summary: Kubernetes API server client is experiencing errors.
+      expr: (sum(rate(rest_client_requests_total{job="apiserver",code=~"5.."}[5m]))
+        by(cluster,instance,job,namespace) / sum(rate(rest_client_requests_total{job="apiserver"}[5m]))
+        by(cluster,instance,job,namespace)) > 0.01
+      for: 15m
+      labels:
+        severity: warning
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  labels:
+    app.kubernetes.io/instance: vmks
+    app.kubernetes.io/managed-by: sync-job
+  name: vmks-rule-kube-apiserver-slos
+  namespace: monitoring
+spec:
+  groups:
+  - name: kube-apiserver-slos
+    rules:
+    - alert: KubeAPIErrorBudgetBurn
+      annotations:
+        description: The Kube API server is burning too much error budget on cluster
+          {{ $labels.cluster }}.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubeapierrorbudgetburn
+        summary: The Kube API server is burning too much error budget.
+      expr: (sum(apiserver_request:burnrate1h) by(cluster) > 0.14400000000000002)
+        and on(cluster) (sum(apiserver_request:burnrate5m) by(cluster) > 0.14400000000000002)
+      for: 2m
+      labels:
+        long: 1h
+        severity: critical
+        short: 5m
+    - alert: KubeAPIErrorBudgetBurn
+      annotations:
+        description: The Kube API server is burning too much error budget on cluster
+          {{ $labels.cluster }}.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubeapierrorbudgetburn
+        summary: The Kube API server is burning too much error budget.
+      expr: (sum(apiserver_request:burnrate6h) by(cluster) > 0.06) and on(cluster)
+        (sum(apiserver_request:burnrate30m) by(cluster) > 0.06)
+      for: 15m
+      labels:
+        long: 6h
+        severity: critical
+        short: 30m
+    - alert: KubeAPIErrorBudgetBurn
+      annotations:
+        description: The Kube API server is burning too much error budget on cluster
+          {{ $labels.cluster }}.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubeapierrorbudgetburn
+        summary: The Kube API server is burning too much error budget.
+      expr: (sum(apiserver_request:burnrate1d) by(cluster) > 0.03) and on(cluster)
+        (sum(apiserver_request:burnrate2h) by(cluster) > 0.03)
+      for: 1h
+      labels:
+        long: 1d
+        severity: warning
+        short: 2h
+    - alert: KubeAPIErrorBudgetBurn
+      annotations:
+        description: The Kube API server is burning too much error budget on cluster
+          {{ $labels.cluster }}.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubeapierrorbudgetburn
+        summary: The Kube API server is burning too much error budget.
+      expr: (sum(apiserver_request:burnrate3d) by(cluster) > 0.01) and on(cluster)
+        (sum(apiserver_request:burnrate6h) by(cluster) > 0.01)
+      for: 3h
+      labels:
+        long: 3d
+        severity: warning
+        short: 6h
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  labels:
+    app.kubernetes.io/instance: vmks
+    app.kubernetes.io/managed-by: sync-job
+  name: vmks-rule-kubernetes-system-apiserver
+  namespace: monitoring
+spec:
+  groups:
+  - name: kubernetes-system-apiserver
+    rules:
+    - alert: KubeClientCertificateExpiration
+      annotations:
+        description: A client certificate used to authenticate to kubernetes apiserver
+          is expiring in less than 7.0 days on cluster {{ $labels.cluster }}.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubeclientcertificateexpiration
+        summary: Client certificate is about to expire.
+      expr: (histogram_quantile(0.01, sum(rate(apiserver_client_certificate_expiration_seconds_bucket{job="apiserver"}[5m]))
+        without(namespace,service,endpoint)) < 604800) and on(job,cluster,instance)
+        (apiserver_client_certificate_expiration_seconds_count{job="apiserver"} >
+        0)
+      for: 5m
+      labels:
+        severity: warning
+    - alert: KubeClientCertificateExpiration
+      annotations:
+        description: A client certificate used to authenticate to kubernetes apiserver
+          is expiring in less than 24.0 hours on cluster {{ $labels.cluster }}.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubeclientcertificateexpiration
+        summary: Client certificate is about to expire.
+      expr: (histogram_quantile(0.01, sum(rate(apiserver_client_certificate_expiration_seconds_bucket{job="apiserver"}[5m]))
+        without(namespace,service,endpoint)) < 86400) and on(job,cluster,instance)
+        (apiserver_client_certificate_expiration_seconds_count{job="apiserver"} >
+        0)
+      for: 5m
+      labels:
+        severity: critical
+    - alert: KubeAggregatedAPIErrors
+      annotations:
+        description: Kubernetes aggregated API {{ $labels.instance }}/{{ $labels.name
+          }} has reported {{ $labels.reason }} errors on cluster {{ $labels.cluster
+          }}.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubeaggregatedapierrors
+        summary: Kubernetes aggregated API has reported errors.
+      expr: sum(increase(aggregator_unavailable_apiservice_total{job="apiserver"}[1m]))
+        by(cluster,instance,name,reason) > 0
+      for: 10m
+      labels:
+        severity: warning
+    - alert: KubeAggregatedAPIDown
+      annotations:
+        description: Kubernetes aggregated API {{ $labels.name }}/{{ $labels.namespace
+          }} has been only {{ $value | humanize }}% available over the last 10m on
+          cluster {{ $labels.cluster }}.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubeaggregatedapidown
+        summary: Kubernetes aggregated API is down.
+      expr: ((1 - max(avg_over_time(aggregator_unavailable_apiservice{job="apiserver"}[10m]))
+        by(name,namespace,cluster)) * 100) < 85
+      for: 5m
+      labels:
+        severity: warning
+    - alert: KubeAPIDown
+      annotations:
+        description: KubeAPI has disappeared from Prometheus target discovery.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubeapidown
+        summary: Target disappeared from Prometheus target discovery.
+      expr: absent(up{job="apiserver"})
+      for: 15m
+      labels:
+        severity: critical
+    - alert: KubeAPIInstanceUnreachable
+      annotations:
+        description: A KubeAPI instance has been unreachable for more than 15 minutes.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubeapiinstanceunreachable
+        summary: KubeAPI instance is unreachable.
+      expr: up{job="apiserver"} == 0
+      for: 15m
+      labels:
+        severity: warning
+    - alert: KubeAPITerminatedRequests
+      annotations:
+        description: The kubernetes apiserver has terminated {{ $value | humanizePercentage
+          }} of its incoming requests on cluster {{ $labels.cluster }}.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubeapiterminatedrequests
+        summary: The kubernetes apiserver has terminated {{ $value | humanizePercentage
+          }} of its incoming requests.
+      expr: (sum(rate(apiserver_request_terminations_total{job="apiserver"}[10m]))
+        by(cluster) / (sum(rate(apiserver_request_total{job="apiserver"}[10m])) by(cluster)
+        + sum(rate(apiserver_request_terminations_total{job="apiserver"}[10m])) by(cluster)))
+        > 0.20
+      for: 5m
+      labels:
+        severity: warning
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  labels:
+    app.kubernetes.io/instance: vmks
+    app.kubernetes.io/managed-by: sync-job
+  name: vmks-rule-kubernetes-system-kubelet
+  namespace: monitoring
+spec:
+  groups:
+  - name: kubernetes-system-kubelet
+    rules:
+    - alert: KubeNodeNotReady
+      annotations:
+        description: '{{ $labels.node }} has been unready for more than 15 minutes
+          on cluster {{ $labels.cluster }}.'
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubenodenotready
+        summary: Node is not ready.
+      expr: (kube_node_status_condition{job="kube-state-metrics",condition="Ready",status="true"}
+        == 0) and on(cluster,node) (kube_node_spec_unschedulable{job="kube-state-metrics"}
+        == 0)
+      for: 15m
+      labels:
+        severity: warning
+    - alert: KubeNodePressure
+      annotations:
+        description: '{{ $labels.node }} on cluster {{ $labels.cluster }} has active
+          Condition {{ $labels.condition }}. This is caused by resource usage exceeding
+          eviction thresholds.'
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubenodepressure
+        summary: Node has as active Condition.
+      expr: (kube_node_status_condition{job="kube-state-metrics",condition=~"(MemoryPressure|DiskPressure|PIDPressure)",status="true"}
+        == 1) and on(cluster,node) (kube_node_spec_unschedulable{job="kube-state-metrics"}
+        == 0)
+      for: 10m
+      labels:
+        severity: info
+    - alert: KubeNodeUnreachable
+      annotations:
+        description: '{{ $labels.node }} is unreachable and some workloads may be
+          rescheduled on cluster {{ $labels.cluster }}.'
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubenodeunreachable
+        summary: Node is unreachable.
+      expr: (kube_node_spec_taint{job="kube-state-metrics",key="node.kubernetes.io/unreachable",effect="NoSchedule"}
+        unless ignoring(key,value) kube_node_spec_taint{job="kube-state-metrics",key=~"ToBeDeletedByClusterAutoscaler|cloud.google.com/impending-node-termination|aws-node-termination-handler/spot-itn"})
+        == 1
+      for: 15m
+      labels:
+        severity: warning
+    - alert: KubeletTooManyPods
+      annotations:
+        description: Kubelet '{{ $labels.node }}' is running at {{ $value | humanizePercentage
+          }} of its Pod capacity on cluster {{ $labels.cluster }}.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubelettoomanypods
+        summary: Kubelet is running at capacity.
+      expr: ((max(kubelet_running_pods{job="kubelet",metrics_path="/metrics"} > 1)
+        by(cluster,instance) * on(cluster,instance) group_left(node) max(kubelet_node_name{job="kubelet",metrics_path="/metrics"})
+        by(cluster,instance,node)) / on(cluster,node) group_left() max(kube_node_status_capacity{job="kube-state-metrics",resource="pods"}
+        != 1) by(cluster,node)) > 0.95
+      for: 15m
+      labels:
+        severity: info
+    - alert: KubeNodeReadinessFlapping
+      annotations:
+        description: The readiness status of node {{ $labels.node }} has changed {{
+          $value }} times in the last 15 minutes on cluster {{ $labels.cluster }}.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubenodereadinessflapping
+        summary: Node readiness status is flapping.
+      expr: (sum(changes(kube_node_status_condition{job="kube-state-metrics",status="true",condition="Ready"}[15m]))
+        by(cluster,node) > 2) and on(cluster,node) (kube_node_spec_unschedulable{job="kube-state-metrics"}
+        == 0)
+      for: 15m
+      labels:
+        severity: warning
+    - alert: KubeNodeEviction
+      annotations:
+        description: Node {{ $labels.node }} on {{ $labels.cluster }} is evicting
+          Pods due to {{ $labels.eviction_signal }}.  Eviction occurs when eviction
+          thresholds are crossed, typically caused by Pods exceeding RAM/ephemeral-storage
+          limits.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubenodeeviction
+        summary: Node is evicting pods.
+      expr: (sum(rate(kubelet_evictions{job="kubelet",metrics_path="/metrics"}[15m]))
+        by(cluster,eviction_signal,instance) * on(cluster,instance) group_left(node)
+        max(kubelet_node_name{job="kubelet",metrics_path="/metrics"}) by(cluster,instance,node))
+        > 0
+      for: 0s
+      labels:
+        severity: info
+    - alert: KubeletPlegDurationHigh
+      annotations:
+        description: The Kubelet Pod Lifecycle Event Generator has a 99th percentile
+          duration of {{ $value }} seconds on node {{ $labels.node }} on cluster {{
+          $labels.cluster }}.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubeletplegdurationhigh
+        summary: Kubelet Pod Lifecycle Event Generator is taking too long to relist.
+      expr: node_quantile:kubelet_pleg_relist_duration_seconds:histogram_quantile{quantile="0.99"}
+        >= 10
+      for: 5m
+      labels:
+        severity: warning
+    - alert: KubeletPodStartUpLatencyHigh
+      annotations:
+        description: Kubelet Pod startup 99th percentile latency is {{ $value }} seconds
+          on node {{ $labels.node }} on cluster {{ $labels.cluster }}.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubeletpodstartuplatencyhigh
+        summary: Kubelet Pod startup latency is too high.
+      expr: (histogram_quantile(0.99, sum(topk(1, rate(kubelet_pod_worker_duration_seconds_bucket{job="kubelet",metrics_path="/metrics"}[5m]))
+        by(cluster,instance,le,operation_type)) by(cluster,instance,le)) * on(cluster,instance)
+        group_left(node) topk(1, kubelet_node_name{job="kubelet",metrics_path="/metrics"})
+        by(cluster,instance,node)) > 60
+      for: 15m
+      labels:
+        severity: warning
+    - alert: KubeletClientCertificateExpiration
+      annotations:
+        description: Client certificate for Kubelet on node {{ $labels.node }} expires
+          in {{ $value | humanizeDuration }} on cluster {{ $labels.cluster }}.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubeletclientcertificateexpiration
+        summary: Kubelet client certificate is about to expire.
+      expr: kubelet_certificate_manager_client_ttl_seconds < 604800
+      labels:
+        severity: warning
+    - alert: KubeletClientCertificateExpiration
+      annotations:
+        description: Client certificate for Kubelet on node {{ $labels.node }} expires
+          in {{ $value | humanizeDuration }} on cluster {{ $labels.cluster }}.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubeletclientcertificateexpiration
+        summary: Kubelet client certificate is about to expire.
+      expr: kubelet_certificate_manager_client_ttl_seconds < 86400
+      labels:
+        severity: critical
+    - alert: KubeletServerCertificateExpiration
+      annotations:
+        description: Server certificate for Kubelet on node {{ $labels.node }} expires
+          in {{ $value | humanizeDuration }} on cluster {{ $labels.cluster }}.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubeletservercertificateexpiration
+        summary: Kubelet server certificate is about to expire.
+      expr: kubelet_certificate_manager_server_ttl_seconds < 604800
+      labels:
+        severity: warning
+    - alert: KubeletServerCertificateExpiration
+      annotations:
+        description: Server certificate for Kubelet on node {{ $labels.node }} expires
+          in {{ $value | humanizeDuration }} on cluster {{ $labels.cluster }}.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubeletservercertificateexpiration
+        summary: Kubelet server certificate is about to expire.
+      expr: kubelet_certificate_manager_server_ttl_seconds < 86400
+      labels:
+        severity: critical
+    - alert: KubeletClientCertificateRenewalErrors
+      annotations:
+        description: Kubelet on node {{ $labels.node }} has failed to renew its client
+          certificate ({{ $value | humanize }} errors in the last 5 minutes) on cluster
+          {{ $labels.cluster }}.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubeletclientcertificaterenewalerrors
+        summary: Kubelet has failed to renew its client certificate.
+      expr: increase(kubelet_certificate_manager_client_expiration_renew_errors[5m])
+        > 0
+      for: 15m
+      labels:
+        severity: warning
+    - alert: KubeletServerCertificateRenewalErrors
+      annotations:
+        description: Kubelet on node {{ $labels.node }} has failed to renew its server
+          certificate ({{ $value | humanize }} errors in the last 5 minutes) on cluster
+          {{ $labels.cluster }}.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubeletservercertificaterenewalerrors
+        summary: Kubelet has failed to renew its server certificate.
+      expr: increase(kubelet_server_expiration_renew_errors[5m]) > 0
+      for: 15m
+      labels:
+        severity: warning
+    - alert: KubeletInstanceUnreachable
+      annotations:
+        description: A Kubelet instance has been unreachable for more than 15 minutes.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubeletinstanceunreachable
+        summary: Kubelet instance is unreachable.
+      expr: up{job="kubelet",metrics_path="/metrics"} == 0
+      for: 15m
+      labels:
+        severity: warning
+    - alert: KubeletDown
+      annotations:
+        description: Kubelet has disappeared from Prometheus target discovery on cluster
+          {{ $labels.cluster }}.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubeletdown
+        summary: Target disappeared from Prometheus target discovery.
+      expr: count(kube_node_info{job="kube-state-metrics"}) by(cluster) unless on(cluster)
+        count(up{job="kubelet",metrics_path="/metrics"} == 1) by(cluster)
+      for: 15m
+      labels:
+        severity: critical
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  labels:
+    app.kubernetes.io/instance: vmks
+    app.kubernetes.io/managed-by: sync-job
+  name: vmks-rule-kubernetes-system-scheduler
+  namespace: monitoring
+spec:
+  groups:
+  - name: kubernetes-system-scheduler
+    rules:
+    - alert: KubeSchedulerDown
+      annotations:
+        description: KubeScheduler has disappeared from Prometheus target discovery.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubeschedulerdown
+        summary: Target disappeared from Prometheus target discovery.
+      expr: absent(up{job="kube-scheduler"})
+      for: 15m
+      labels:
+        severity: critical
+    - alert: KubeSchedulerInstanceUnreachable
+      annotations:
+        description: A KubeScheduler instance has been unreachable for more than 15
+          minutes.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubeschedulerinstanceunreachable
+        summary: KubeScheduler instance is unreachable.
+      expr: up{job="kube-scheduler"} == 0
+      for: 15m
+      labels:
+        severity: warning
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  labels:
+    app.kubernetes.io/instance: vmks
+    app.kubernetes.io/managed-by: sync-job
+  name: vmks-rule-kubernetes-system-controller-manager
+  namespace: monitoring
+spec:
+  groups:
+  - name: kubernetes-system-controller-manager
+    rules:
+    - alert: KubeControllerManagerDown
+      annotations:
+        description: KubeControllerManager has disappeared from Prometheus target
+          discovery.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubecontrollermanagerdown
+        summary: Target disappeared from Prometheus target discovery.
+      expr: absent(up{job="kube-controller-manager"})
+      for: 15m
+      labels:
+        severity: critical
+    - alert: KubeControllerManagerInstanceUnreachable
+      annotations:
+        description: A KubeControllerManager instance has been unreachable for more
+          than 15 minutes.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubecontrollermanagerinstanceunreachable
+        summary: KubeControllerManager instance is unreachable.
+      expr: up{job="kube-controller-manager"} == 0
+      for: 15m
+      labels:
+        severity: warning
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  labels:
+    app.kubernetes.io/instance: vmks
+    app.kubernetes.io/managed-by: sync-job
+  name: vmks-rule-kube-apiserver-availability-rules
+  namespace: monitoring
+spec:
+  groups:
+  - interval: 3m
+    name: kube-apiserver-availability.rules
+    rules:
+    - expr: (avg_over_time(code_verb:apiserver_request_total:increase1h[30d]) * 24)
+        * 30
+      record: code_verb:apiserver_request_total:increase30d
+    - expr: sum(code_verb:apiserver_request_total:increase30d{verb=~"LIST|GET"}) by(cluster,code)
+      labels:
+        verb: read
+      record: code:apiserver_request_total:increase30d
+    - expr: sum(code_verb:apiserver_request_total:increase30d{verb=~"POST|PUT|PATCH|DELETE"})
+        by(cluster,code)
+      labels:
+        verb: write
+      record: code:apiserver_request_total:increase30d
+    - expr: sum(increase(apiserver_request_sli_duration_seconds_bucket[1h])) by(cluster,verb,scope,le)
+      record: cluster_verb_scope_le:apiserver_request_sli_duration_seconds_bucket:increase1h
+    - expr: sum((avg_over_time(cluster_verb_scope_le:apiserver_request_sli_duration_seconds_bucket:increase1h[30d])
+        * 24) * 30) by(cluster,verb,scope,le)
+      record: cluster_verb_scope_le:apiserver_request_sli_duration_seconds_bucket:increase30d
+    - expr: sum(cluster_verb_scope_le:apiserver_request_sli_duration_seconds_bucket:increase1h{le="+Inf"})
+        by(cluster,verb,scope)
+      record: cluster_verb_scope:apiserver_request_sli_duration_seconds_count:increase1h
+    - expr: sum(cluster_verb_scope_le:apiserver_request_sli_duration_seconds_bucket:increase30d{le="+Inf"})
+        by(cluster,verb,scope)
+      record: cluster_verb_scope:apiserver_request_sli_duration_seconds_count:increase30d
+    - expr: 1 - ((((sum(cluster_verb_scope:apiserver_request_sli_duration_seconds_count:increase30d{verb=~"POST|PUT|PATCH|DELETE"})
+        by(cluster) - sum(cluster_verb_scope_le:apiserver_request_sli_duration_seconds_bucket:increase30d{verb=~"POST|PUT|PATCH|DELETE",le=~"1(\\.0)?"}
+        or vector(0)) by(cluster)) + (sum(cluster_verb_scope:apiserver_request_sli_duration_seconds_count:increase30d{verb=~"LIST|GET"})
+        by(cluster) - ((sum(cluster_verb_scope_le:apiserver_request_sli_duration_seconds_bucket:increase30d{verb=~"LIST|GET",scope=~"resource|",le=~"1(\\.0)?"}
+        or vector(0)) by(cluster) + sum(cluster_verb_scope_le:apiserver_request_sli_duration_seconds_bucket:increase30d{verb=~"LIST|GET",scope="namespace",le=~"5(\\.0)?"}
+        or vector(0)) by(cluster)) + sum(cluster_verb_scope_le:apiserver_request_sli_duration_seconds_bucket:increase30d{verb=~"LIST|GET",scope="cluster",le=~"30(\\.0)?"}
+        or vector(0)) by(cluster)))) + sum(code:apiserver_request_total:increase30d{code=~"5.."}
+        or vector(0)) by(cluster)) / sum(code:apiserver_request_total:increase30d)
+        by(cluster))
+      labels:
+        verb: all
+      record: apiserver_request:availability30d
+    - expr: 1 - (((sum(cluster_verb_scope:apiserver_request_sli_duration_seconds_count:increase30d{verb=~"LIST|GET"})
+        by(cluster) - ((sum(cluster_verb_scope_le:apiserver_request_sli_duration_seconds_bucket:increase30d{verb=~"LIST|GET",scope=~"resource|",le=~"1(\\.0)?"}
+        or vector(0)) by(cluster) + sum(cluster_verb_scope_le:apiserver_request_sli_duration_seconds_bucket:increase30d{verb=~"LIST|GET",scope="namespace",le=~"5(\\.0)?"}
+        or vector(0)) by(cluster)) + sum(cluster_verb_scope_le:apiserver_request_sli_duration_seconds_bucket:increase30d{verb=~"LIST|GET",scope="cluster",le=~"30(\\.0)?"}
+        or vector(0)) by(cluster))) + sum(code:apiserver_request_total:increase30d{verb="read",code=~"5.."}
+        or vector(0)) by(cluster)) / sum(code:apiserver_request_total:increase30d{verb="read"})
+        by(cluster))
+      labels:
+        verb: read
+      record: apiserver_request:availability30d
+    - expr: 1 - (((sum(cluster_verb_scope:apiserver_request_sli_duration_seconds_count:increase30d{verb=~"POST|PUT|PATCH|DELETE"})
+        by(cluster) - sum(cluster_verb_scope_le:apiserver_request_sli_duration_seconds_bucket:increase30d{verb=~"POST|PUT|PATCH|DELETE",le=~"1(\\.0)?"}
+        or vector(0)) by(cluster)) + sum(code:apiserver_request_total:increase30d{verb="write",code=~"5.."}
+        or vector(0)) by(cluster)) / sum(code:apiserver_request_total:increase30d{verb="write"})
+        by(cluster))
+      labels:
+        verb: write
+      record: apiserver_request:availability30d
+    - expr: sum(rate(apiserver_request_total{job="apiserver",verb=~"LIST|GET"}[5m]))
+        by(cluster,code,resource)
+      labels:
+        verb: read
+      record: code_resource:apiserver_request_total:rate5m
+    - expr: sum(rate(apiserver_request_total{job="apiserver",verb=~"POST|PUT|PATCH|DELETE"}[5m]))
+        by(cluster,code,resource)
+      labels:
+        verb: write
+      record: code_resource:apiserver_request_total:rate5m
+    - expr: sum(increase(apiserver_request_total{job="apiserver",verb=~"LIST|GET|POST|PUT|PATCH|DELETE",code=~"2.."}[1h]))
+        by(cluster,code,verb)
+      record: code_verb:apiserver_request_total:increase1h
+    - expr: sum(increase(apiserver_request_total{job="apiserver",verb=~"LIST|GET|POST|PUT|PATCH|DELETE",code=~"3.."}[1h]))
+        by(cluster,code,verb)
+      record: code_verb:apiserver_request_total:increase1h
+    - expr: sum(increase(apiserver_request_total{job="apiserver",verb=~"LIST|GET|POST|PUT|PATCH|DELETE",code=~"4.."}[1h]))
+        by(cluster,code,verb)
+      record: code_verb:apiserver_request_total:increase1h
+    - expr: sum(increase(apiserver_request_total{job="apiserver",verb=~"LIST|GET|POST|PUT|PATCH|DELETE",code=~"5.."}[1h]))
+        by(cluster,code,verb)
+      record: code_verb:apiserver_request_total:increase1h
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  labels:
+    app.kubernetes.io/instance: vmks
+    app.kubernetes.io/managed-by: sync-job
+  name: vmks-rule-kube-apiserver-burnrate-rules
+  namespace: monitoring
+spec:
+  groups:
+  - name: kube-apiserver-burnrate.rules
+    rules:
+    - expr: (sum(rate(apiserver_request_sli_duration_seconds_count{job="apiserver",verb=~"LIST|GET",subresource!~"proxy|attach|log|exec|portforward"}[5m]))
+        by(cluster) - (((sum(rate(apiserver_request_sli_duration_seconds_bucket{job="apiserver",verb=~"LIST|GET",subresource!~"proxy|attach|log|exec|portforward",scope=~"resource|",le=~"1(\\.0)?"}[5m]))
+        by(cluster) or vector(0)) + sum(rate(apiserver_request_sli_duration_seconds_bucket{job="apiserver",verb=~"LIST|GET",subresource!~"proxy|attach|log|exec|portforward",scope="namespace",le=~"5(\\.0)?"}[5m]))
+        by(cluster)) + sum(rate(apiserver_request_sli_duration_seconds_bucket{job="apiserver",verb=~"LIST|GET",subresource!~"proxy|attach|log|exec|portforward",scope="cluster",le=~"30(\\.0)?"}[5m]))
+        by(cluster))) + sum(rate(apiserver_request_total{job="apiserver",verb=~"LIST|GET",code=~"5.."}[5m]))
+        by(cluster)
+      labels:
+        verb: read
+      record: cluster_verb:apiserver_request_sli_bad_events:rate5m
+    - expr: (sum(rate(apiserver_request_sli_duration_seconds_count{job="apiserver",verb=~"POST|PUT|PATCH|DELETE",subresource!~"proxy|attach|log|exec|portforward"}[5m]))
+        by(cluster) - sum(rate(apiserver_request_sli_duration_seconds_bucket{job="apiserver",verb=~"POST|PUT|PATCH|DELETE",subresource!~"proxy|attach|log|exec|portforward",le=~"1(\\.0)?"}[5m]))
+        by(cluster)) + sum(rate(apiserver_request_total{job="apiserver",verb=~"POST|PUT|PATCH|DELETE",code=~"5.."}[5m]))
+        by(cluster)
+      labels:
+        verb: write
+      record: cluster_verb:apiserver_request_sli_bad_events:rate5m
+    - expr: sum(rate(apiserver_request_total{job="apiserver",verb=~"LIST|GET"}[5m]))
+        by(cluster)
+      labels:
+        verb: read
+      record: cluster_verb:apiserver_request_sli_events:rate5m
+    - expr: sum(rate(apiserver_request_total{job="apiserver",verb=~"POST|PUT|PATCH|DELETE"}[5m]))
+        by(cluster)
+      labels:
+        verb: write
+      record: cluster_verb:apiserver_request_sli_events:rate5m
+    - expr: cluster_verb:apiserver_request_sli_bad_events:rate5m / cluster_verb:apiserver_request_sli_events:rate5m
+      record: apiserver_request:burnrate5m
+    - expr: ((sum(rate(apiserver_request_sli_duration_seconds_count{job="apiserver",verb=~"LIST|GET",subresource!~"proxy|attach|log|exec|portforward"}[1h]))
+        by(cluster) - (((sum(rate(apiserver_request_sli_duration_seconds_bucket{job="apiserver",verb=~"LIST|GET",subresource!~"proxy|attach|log|exec|portforward",scope=~"resource|",le=~"1(\\.0)?"}[1h]))
+        by(cluster) or vector(0)) + sum(rate(apiserver_request_sli_duration_seconds_bucket{job="apiserver",verb=~"LIST|GET",subresource!~"proxy|attach|log|exec|portforward",scope="namespace",le=~"5(\\.0)?"}[1h]))
+        by(cluster)) + sum(rate(apiserver_request_sli_duration_seconds_bucket{job="apiserver",verb=~"LIST|GET",subresource!~"proxy|attach|log|exec|portforward",scope="cluster",le=~"30(\\.0)?"}[1h]))
+        by(cluster))) + sum(rate(apiserver_request_total{job="apiserver",verb=~"LIST|GET",code=~"5.."}[1h]))
+        by(cluster)) / sum(rate(apiserver_request_total{job="apiserver",verb=~"LIST|GET"}[1h]))
+        by(cluster)
+      labels:
+        verb: read
+      record: apiserver_request:burnrate1h
+    - expr: ((sum(rate(apiserver_request_sli_duration_seconds_count{job="apiserver",verb=~"POST|PUT|PATCH|DELETE",subresource!~"proxy|attach|log|exec|portforward"}[1h]))
+        by(cluster) - sum(rate(apiserver_request_sli_duration_seconds_bucket{job="apiserver",verb=~"POST|PUT|PATCH|DELETE",subresource!~"proxy|attach|log|exec|portforward",le=~"1(\\.0)?"}[1h]))
+        by(cluster)) + sum(rate(apiserver_request_total{job="apiserver",verb=~"POST|PUT|PATCH|DELETE",code=~"5.."}[1h]))
+        by(cluster)) / sum(rate(apiserver_request_total{job="apiserver",verb=~"POST|PUT|PATCH|DELETE"}[1h]))
+        by(cluster)
+      labels:
+        verb: write
+      record: apiserver_request:burnrate1h
+    - expr: ((sum(rate(apiserver_request_sli_duration_seconds_count{job="apiserver",verb=~"LIST|GET",subresource!~"proxy|attach|log|exec|portforward"}[2h]))
+        by(cluster) - (((sum(rate(apiserver_request_sli_duration_seconds_bucket{job="apiserver",verb=~"LIST|GET",subresource!~"proxy|attach|log|exec|portforward",scope=~"resource|",le=~"1(\\.0)?"}[2h]))
+        by(cluster) or vector(0)) + sum(rate(apiserver_request_sli_duration_seconds_bucket{job="apiserver",verb=~"LIST|GET",subresource!~"proxy|attach|log|exec|portforward",scope="namespace",le=~"5(\\.0)?"}[2h]))
+        by(cluster)) + sum(rate(apiserver_request_sli_duration_seconds_bucket{job="apiserver",verb=~"LIST|GET",subresource!~"proxy|attach|log|exec|portforward",scope="cluster",le=~"30(\\.0)?"}[2h]))
+        by(cluster))) + sum(rate(apiserver_request_total{job="apiserver",verb=~"LIST|GET",code=~"5.."}[2h]))
+        by(cluster)) / sum(rate(apiserver_request_total{job="apiserver",verb=~"LIST|GET"}[2h]))
+        by(cluster)
+      labels:
+        verb: read
+      record: apiserver_request:burnrate2h
+    - expr: ((sum(rate(apiserver_request_sli_duration_seconds_count{job="apiserver",verb=~"POST|PUT|PATCH|DELETE",subresource!~"proxy|attach|log|exec|portforward"}[2h]))
+        by(cluster) - sum(rate(apiserver_request_sli_duration_seconds_bucket{job="apiserver",verb=~"POST|PUT|PATCH|DELETE",subresource!~"proxy|attach|log|exec|portforward",le=~"1(\\.0)?"}[2h]))
+        by(cluster)) + sum(rate(apiserver_request_total{job="apiserver",verb=~"POST|PUT|PATCH|DELETE",code=~"5.."}[2h]))
+        by(cluster)) / sum(rate(apiserver_request_total{job="apiserver",verb=~"POST|PUT|PATCH|DELETE"}[2h]))
+        by(cluster)
+      labels:
+        verb: write
+      record: apiserver_request:burnrate2h
+    - expr: ((sum(rate(apiserver_request_sli_duration_seconds_count{job="apiserver",verb=~"LIST|GET",subresource!~"proxy|attach|log|exec|portforward"}[30m]))
+        by(cluster) - (((sum(rate(apiserver_request_sli_duration_seconds_bucket{job="apiserver",verb=~"LIST|GET",subresource!~"proxy|attach|log|exec|portforward",scope=~"resource|",le=~"1(\\.0)?"}[30m]))
+        by(cluster) or vector(0)) + sum(rate(apiserver_request_sli_duration_seconds_bucket{job="apiserver",verb=~"LIST|GET",subresource!~"proxy|attach|log|exec|portforward",scope="namespace",le=~"5(\\.0)?"}[30m]))
+        by(cluster)) + sum(rate(apiserver_request_sli_duration_seconds_bucket{job="apiserver",verb=~"LIST|GET",subresource!~"proxy|attach|log|exec|portforward",scope="cluster",le=~"30(\\.0)?"}[30m]))
+        by(cluster))) + sum(rate(apiserver_request_total{job="apiserver",verb=~"LIST|GET",code=~"5.."}[30m]))
+        by(cluster)) / sum(rate(apiserver_request_total{job="apiserver",verb=~"LIST|GET"}[30m]))
+        by(cluster)
+      labels:
+        verb: read
+      record: apiserver_request:burnrate30m
+    - expr: ((sum(rate(apiserver_request_sli_duration_seconds_count{job="apiserver",verb=~"POST|PUT|PATCH|DELETE",subresource!~"proxy|attach|log|exec|portforward"}[30m]))
+        by(cluster) - sum(rate(apiserver_request_sli_duration_seconds_bucket{job="apiserver",verb=~"POST|PUT|PATCH|DELETE",subresource!~"proxy|attach|log|exec|portforward",le=~"1(\\.0)?"}[30m]))
+        by(cluster)) + sum(rate(apiserver_request_total{job="apiserver",verb=~"POST|PUT|PATCH|DELETE",code=~"5.."}[30m]))
+        by(cluster)) / sum(rate(apiserver_request_total{job="apiserver",verb=~"POST|PUT|PATCH|DELETE"}[30m]))
+        by(cluster)
+      labels:
+        verb: write
+      record: apiserver_request:burnrate30m
+    - expr: ((sum(rate(apiserver_request_sli_duration_seconds_count{job="apiserver",verb=~"LIST|GET",subresource!~"proxy|attach|log|exec|portforward"}[6h]))
+        by(cluster) - (((sum(rate(apiserver_request_sli_duration_seconds_bucket{job="apiserver",verb=~"LIST|GET",subresource!~"proxy|attach|log|exec|portforward",scope=~"resource|",le=~"1(\\.0)?"}[6h]))
+        by(cluster) or vector(0)) + sum(rate(apiserver_request_sli_duration_seconds_bucket{job="apiserver",verb=~"LIST|GET",subresource!~"proxy|attach|log|exec|portforward",scope="namespace",le=~"5(\\.0)?"}[6h]))
+        by(cluster)) + sum(rate(apiserver_request_sli_duration_seconds_bucket{job="apiserver",verb=~"LIST|GET",subresource!~"proxy|attach|log|exec|portforward",scope="cluster",le=~"30(\\.0)?"}[6h]))
+        by(cluster))) + sum(rate(apiserver_request_total{job="apiserver",verb=~"LIST|GET",code=~"5.."}[6h]))
+        by(cluster)) / sum(rate(apiserver_request_total{job="apiserver",verb=~"LIST|GET"}[6h]))
+        by(cluster)
+      labels:
+        verb: read
+      record: apiserver_request:burnrate6h
+    - expr: ((sum(rate(apiserver_request_sli_duration_seconds_count{job="apiserver",verb=~"POST|PUT|PATCH|DELETE",subresource!~"proxy|attach|log|exec|portforward"}[6h]))
+        by(cluster) - sum(rate(apiserver_request_sli_duration_seconds_bucket{job="apiserver",verb=~"POST|PUT|PATCH|DELETE",subresource!~"proxy|attach|log|exec|portforward",le=~"1(\\.0)?"}[6h]))
+        by(cluster)) + sum(rate(apiserver_request_total{job="apiserver",verb=~"POST|PUT|PATCH|DELETE",code=~"5.."}[6h]))
+        by(cluster)) / sum(rate(apiserver_request_total{job="apiserver",verb=~"POST|PUT|PATCH|DELETE"}[6h]))
+        by(cluster)
+      labels:
+        verb: write
+      record: apiserver_request:burnrate6h
+    - expr: avg_over_time(cluster_verb:apiserver_request_sli_bad_events:rate5m[1d])
+        / avg_over_time(cluster_verb:apiserver_request_sli_events:rate5m[1d])
+      record: apiserver_request:burnrate1d
+    - expr: avg_over_time(cluster_verb:apiserver_request_sli_bad_events:rate5m[3d])
+        / avg_over_time(cluster_verb:apiserver_request_sli_events:rate5m[3d])
+      record: apiserver_request:burnrate3d
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  labels:
+    app.kubernetes.io/instance: vmks
+    app.kubernetes.io/managed-by: sync-job
+  name: vmks-rule-kube-apiserver-histogram-rules
+  namespace: monitoring
+spec:
+  groups:
+  - name: kube-apiserver-histogram.rules
+    rules:
+    - expr: histogram_quantile(0.99, sum(rate(apiserver_request_sli_duration_seconds_bucket{job="apiserver",verb=~"LIST|GET",subresource!~"proxy|attach|log|exec|portforward"}[5m]))
+        by(cluster,le,resource)) > 0
+      labels:
+        quantile: '0.99'
+        verb: read
+      record: cluster_quantile:apiserver_request_sli_duration_seconds:histogram_quantile
+    - expr: histogram_quantile(0.99, sum(rate(apiserver_request_sli_duration_seconds_bucket{job="apiserver",verb=~"POST|PUT|PATCH|DELETE",subresource!~"proxy|attach|log|exec|portforward"}[5m]))
+        by(cluster,le,resource)) > 0
+      labels:
+        quantile: '0.99'
+        verb: write
+      record: cluster_quantile:apiserver_request_sli_duration_seconds:histogram_quantile
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  labels:
+    app.kubernetes.io/instance: vmks
+    app.kubernetes.io/managed-by: sync-job
+  name: vmks-rule-k8s-rules-container-cpu-usage-seconds-total
+  namespace: monitoring
+spec:
+  groups:
+  - name: k8s.rules.container_cpu_usage_seconds_total
+    rules:
+    - expr: sum(rate(container_cpu_usage_seconds_total{job="kubelet",metrics_path="/metrics/cadvisor",image!=""}[5m]))
+        by(cluster,namespace,pod,container) * on(cluster,namespace,pod) group_left(node)
+        topk(1, max(kube_pod_info{node!=""}) by(cluster,namespace,pod,node)) by(cluster,namespace,pod)
+      record: node_namespace_pod_container:container_cpu_usage_seconds_total:sum_rate5m
+    - expr: sum(irate(container_cpu_usage_seconds_total{job="kubelet",metrics_path="/metrics/cadvisor",image!=""}[5m]))
+        by(cluster,namespace,pod,container) * on(cluster,namespace,pod) group_left(node)
+        topk(1, max(kube_pod_info{node!=""}) by(cluster,namespace,pod,node)) by(cluster,namespace,pod)
+      record: node_namespace_pod_container:container_cpu_usage_seconds_total:sum_irate
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  labels:
+    app.kubernetes.io/instance: vmks
+    app.kubernetes.io/managed-by: sync-job
+  name: vmks-rule-k8s-rules-container-memory-working-set-bytes
+  namespace: monitoring
+spec:
+  groups:
+  - name: k8s.rules.container_memory_working_set_bytes
+    rules:
+    - expr: container_memory_working_set_bytes{job="kubelet",metrics_path="/metrics/cadvisor",image!=""}
+        * on(cluster,namespace,pod) group_left(node) topk(1, max(kube_pod_info{node!=""})
+        by(cluster,namespace,pod,node)) by(cluster,namespace,pod)
+      record: node_namespace_pod_container:container_memory_working_set_bytes
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  labels:
+    app.kubernetes.io/instance: vmks
+    app.kubernetes.io/managed-by: sync-job
+  name: vmks-rule-k8s-rules-container-memory-rss
+  namespace: monitoring
+spec:
+  groups:
+  - name: k8s.rules.container_memory_rss
+    rules:
+    - expr: container_memory_rss{job="kubelet",metrics_path="/metrics/cadvisor",image!=""}
+        * on(cluster,namespace,pod) group_left(node) topk(1, max(kube_pod_info{node!=""})
+        by(cluster,namespace,pod,node)) by(cluster,namespace,pod)
+      record: node_namespace_pod_container:container_memory_rss
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  labels:
+    app.kubernetes.io/instance: vmks
+    app.kubernetes.io/managed-by: sync-job
+  name: vmks-rule-k8s-rules-container-memory-cache
+  namespace: monitoring
+spec:
+  groups:
+  - name: k8s.rules.container_memory_cache
+    rules:
+    - expr: container_memory_cache{job="kubelet",metrics_path="/metrics/cadvisor",image!=""}
+        * on(cluster,namespace,pod) group_left(node) topk(1, max(kube_pod_info{node!=""})
+        by(cluster,namespace,pod,node)) by(cluster,namespace,pod)
+      record: node_namespace_pod_container:container_memory_cache
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  labels:
+    app.kubernetes.io/instance: vmks
+    app.kubernetes.io/managed-by: sync-job
+  name: vmks-rule-k8s-rules-container-memory-swap
+  namespace: monitoring
+spec:
+  groups:
+  - name: k8s.rules.container_memory_swap
+    rules:
+    - expr: container_memory_swap{job="kubelet",metrics_path="/metrics/cadvisor",image!=""}
+        * on(cluster,namespace,pod) group_left(node) topk(1, max(kube_pod_info{node!=""})
+        by(cluster,namespace,pod,node)) by(cluster,namespace,pod)
+      record: node_namespace_pod_container:container_memory_swap
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  labels:
+    app.kubernetes.io/instance: vmks
+    app.kubernetes.io/managed-by: sync-job
+  name: vmks-rule-k8s-rules-container-memory-requests
+  namespace: monitoring
+spec:
+  groups:
+  - name: k8s.rules.container_memory_requests
+    rules:
+    - expr: kube_pod_container_resource_requests{resource="memory",job="kube-state-metrics"}
+        * on(namespace,pod,cluster) group_left() max(kube_pod_status_phase{phase=~"Pending|Running"}
+        == 1) by(namespace,pod,cluster)
+      record: cluster:namespace:pod_memory:active:kube_pod_container_resource_requests
+    - expr: sum(sum(max(kube_pod_container_resource_requests{resource="memory",job="kube-state-metrics"})
+        by(namespace,pod,container,cluster) * on(namespace,pod,cluster) group_left()
+        max(kube_pod_status_phase{phase=~"Pending|Running"} == 1) by(namespace,pod,cluster))
+        by(namespace,pod,cluster)) by(namespace,cluster)
+      record: namespace_memory:kube_pod_container_resource_requests:sum
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  labels:
+    app.kubernetes.io/instance: vmks
+    app.kubernetes.io/managed-by: sync-job
+  name: vmks-rule-k8s-rules-container-cpu-requests
+  namespace: monitoring
+spec:
+  groups:
+  - name: k8s.rules.container_cpu_requests
+    rules:
+    - expr: kube_pod_container_resource_requests{resource="cpu",job="kube-state-metrics"}
+        * on(namespace,pod,cluster) group_left() max(kube_pod_status_phase{phase=~"Pending|Running"}
+        == 1) by(namespace,pod,cluster)
+      record: cluster:namespace:pod_cpu:active:kube_pod_container_resource_requests
+    - expr: sum(sum(max(kube_pod_container_resource_requests{resource="cpu",job="kube-state-metrics"})
+        by(namespace,pod,container,cluster) * on(namespace,pod,cluster) group_left()
+        max(kube_pod_status_phase{phase=~"Pending|Running"} == 1) by(namespace,pod,cluster))
+        by(namespace,pod,cluster)) by(namespace,cluster)
+      record: namespace_cpu:kube_pod_container_resource_requests:sum
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  labels:
+    app.kubernetes.io/instance: vmks
+    app.kubernetes.io/managed-by: sync-job
+  name: vmks-rule-k8s-rules-container-memory-limits
+  namespace: monitoring
+spec:
+  groups:
+  - name: k8s.rules.container_memory_limits
+    rules:
+    - expr: kube_pod_container_resource_limits{resource="memory",job="kube-state-metrics"}
+        * on(namespace,pod,cluster) group_left() max(kube_pod_status_phase{phase=~"Pending|Running"}
+        == 1) by(namespace,pod,cluster)
+      record: cluster:namespace:pod_memory:active:kube_pod_container_resource_limits
+    - expr: sum(sum(max(kube_pod_container_resource_limits{resource="memory",job="kube-state-metrics"})
+        by(namespace,pod,container,cluster) * on(namespace,pod,cluster) group_left()
+        max(kube_pod_status_phase{phase=~"Pending|Running"} == 1) by(namespace,pod,cluster))
+        by(namespace,pod,cluster)) by(namespace,cluster)
+      record: namespace_memory:kube_pod_container_resource_limits:sum
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  labels:
+    app.kubernetes.io/instance: vmks
+    app.kubernetes.io/managed-by: sync-job
+  name: vmks-rule-k8s-rules-container-cpu-limits
+  namespace: monitoring
+spec:
+  groups:
+  - name: k8s.rules.container_cpu_limits
+    rules:
+    - expr: kube_pod_container_resource_limits{resource="cpu",job="kube-state-metrics"}
+        * on(namespace,pod,cluster) group_left() max(kube_pod_status_phase{phase=~"Pending|Running"}
+        == 1) by(namespace,pod,cluster)
+      record: cluster:namespace:pod_cpu:active:kube_pod_container_resource_limits
+    - expr: sum(sum(max(kube_pod_container_resource_limits{resource="cpu",job="kube-state-metrics"})
+        by(namespace,pod,container,cluster) * on(namespace,pod,cluster) group_left()
+        max(kube_pod_status_phase{phase=~"Pending|Running"} == 1) by(namespace,pod,cluster))
+        by(namespace,pod,cluster)) by(namespace,cluster)
+      record: namespace_cpu:kube_pod_container_resource_limits:sum
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  labels:
+    app.kubernetes.io/instance: vmks
+    app.kubernetes.io/managed-by: sync-job
+  name: vmks-rule-k8s-rules-pod-owner
+  namespace: monitoring
+spec:
+  groups:
+  - name: k8s.rules.pod_owner
+    rules:
+    - expr: max(label_replace(label_replace(kube_pod_owner{job="kube-state-metrics",owner_kind="ReplicaSet"},
+        "replicaset", "$1", "owner_name", "(.*)") * on(cluster,replicaset,namespace)
+        group_left(owner_name) topk(1, max(kube_replicaset_owner{job="kube-state-metrics",owner_kind=""})
+        by(cluster,replicaset,namespace,owner_name)) by(cluster,replicaset,namespace),
+        "workload", "$1", "replicaset", "(.*)")) by(cluster,namespace,workload,pod)
+      labels:
+        workload_type: replicaset
+      record: namespace_workload_pod:kube_pod_owner:relabel
+    - expr: max(label_replace(label_replace(kube_pod_owner{job="kube-state-metrics",owner_kind="ReplicaSet"},
+        "replicaset", "$1", "owner_name", "(.*)") * on(replicaset,namespace,cluster)
+        group_left(owner_name) topk(1, max(kube_replicaset_owner{job="kube-state-metrics",owner_kind="Deployment"})
+        by(cluster,replicaset,namespace,owner_name)) by(cluster,replicaset,namespace),
+        "workload", "$1", "owner_name", "(.*)")) by(cluster,namespace,workload,pod)
+      labels:
+        workload_type: deployment
+      record: namespace_workload_pod:kube_pod_owner:relabel
+    - expr: max(label_replace(kube_pod_owner{job="kube-state-metrics",owner_kind="DaemonSet"},
+        "workload", "$1", "owner_name", "(.*)")) by(cluster,namespace,workload,pod)
+      labels:
+        workload_type: daemonset
+      record: namespace_workload_pod:kube_pod_owner:relabel
+    - expr: max(label_replace(kube_pod_owner{job="kube-state-metrics",owner_kind="StatefulSet"},
+        "workload", "$1", "owner_name", "(.*)")) by(cluster,namespace,workload,pod)
+      labels:
+        workload_type: statefulset
+      record: namespace_workload_pod:kube_pod_owner:relabel
+    - expr: group(label_join(group(label_join(kube_pod_owner{job="kube-state-metrics",owner_kind="Job"},
+        "job_name", "", "owner_name")) by(cluster,namespace,job_name,pod,owner_name)
+        * on(cluster,namespace,job_name) group_left() group(kube_job_owner{job="kube-state-metrics",owner_kind=~"Pod|"})
+        by(cluster,namespace,job_name), "workload", "", "owner_name")) by(cluster,namespace,workload,pod)
+      labels:
+        workload_type: job
+      record: namespace_workload_pod:kube_pod_owner:relabel
+    - expr: max(label_replace(kube_pod_owner{job="kube-state-metrics",owner_kind="",owner_name=""},
+        "workload", "$1", "pod", "(.+)")) by(cluster,namespace,workload,pod)
+      labels:
+        workload_type: barepod
+      record: namespace_workload_pod:kube_pod_owner:relabel
+    - expr: max(label_replace(kube_pod_owner{job="kube-state-metrics",owner_kind="Node"},
+        "workload", "$1", "pod", "(.+)")) by(cluster,namespace,workload,pod)
+      labels:
+        workload_type: staticpod
+      record: namespace_workload_pod:kube_pod_owner:relabel
+    - expr: group(label_join(label_join(group(label_join(kube_pod_owner{job="kube-state-metrics",owner_kind="Job"},
+        "job_name", "", "owner_name")) by(cluster,namespace,job_name,pod) * on(cluster,namespace,job_name)
+        group_left(owner_kind,owner_name) group(kube_job_owner{job="kube-state-metrics",owner_kind!="Pod",owner_kind!=""})
+        by(cluster,namespace,job_name,owner_kind,owner_name), "workload", "", "owner_name"),
+        "workload_type", "", "owner_kind") or label_replace(label_replace(label_replace(kube_pod_owner{job="kube-state-metrics",owner_kind="ReplicaSet"},
+        "replicaset", "$1", "owner_name", "(.+)") * on(cluster,namespace,replicaset)
+        group_left(owner_kind,owner_name) group(kube_replicaset_owner{job="kube-state-metrics",owner_kind!="Deployment",owner_kind!=""})
+        by(cluster,namespace,replicaset,owner_kind,owner_name), "workload", "$1",
+        "owner_name", "(.+)") or label_replace(group(kube_pod_owner{job="kube-state-metrics",owner_kind!="ReplicaSet",owner_kind!="DaemonSet",owner_kind!="StatefulSet",owner_kind!="Job",owner_kind!="Node",owner_kind!=""})
+        by(cluster,namespace,pod,owner_name,owner_kind), "workload", "$1", "owner_name",
+        "(.+)"), "workload_type", "$1", "owner_kind", "(.+)")) by(cluster,namespace,workload,workload_type,pod)
+      record: namespace_workload_pod:kube_pod_owner:relabel
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  labels:
+    app.kubernetes.io/instance: vmks
+    app.kubernetes.io/managed-by: sync-job
+  name: vmks-rule-kube-scheduler-rules
+  namespace: monitoring
+spec:
+  groups:
+  - name: kube-scheduler.rules
+    rules:
+    - expr: histogram_quantile(0.99, sum(rate(scheduler_scheduling_attempt_duration_seconds_bucket{job="kube-scheduler"}[5m]))
+        without(instance,pod))
+      labels:
+        quantile: '0.99'
+      record: cluster_quantile:scheduler_scheduling_attempt_duration_seconds:histogram_quantile
+    - expr: histogram_quantile(0.99, sum(rate(scheduler_scheduling_algorithm_duration_seconds_bucket{job="kube-scheduler"}[5m]))
+        without(instance,pod))
+      labels:
+        quantile: '0.99'
+      record: cluster_quantile:scheduler_scheduling_algorithm_duration_seconds:histogram_quantile
+    - expr: histogram_quantile(0.99, sum(rate(scheduler_pod_scheduling_sli_duration_seconds_bucket{job="kube-scheduler"}[5m]))
+        without(instance,pod))
+      labels:
+        quantile: '0.99'
+      record: cluster_quantile:scheduler_pod_scheduling_sli_duration_seconds:histogram_quantile
+    - expr: histogram_quantile(0.9, sum(rate(scheduler_scheduling_attempt_duration_seconds_bucket{job="kube-scheduler"}[5m]))
+        without(instance,pod))
+      labels:
+        quantile: '0.9'
+      record: cluster_quantile:scheduler_scheduling_attempt_duration_seconds:histogram_quantile
+    - expr: histogram_quantile(0.9, sum(rate(scheduler_scheduling_algorithm_duration_seconds_bucket{job="kube-scheduler"}[5m]))
+        without(instance,pod))
+      labels:
+        quantile: '0.9'
+      record: cluster_quantile:scheduler_scheduling_algorithm_duration_seconds:histogram_quantile
+    - expr: histogram_quantile(0.9, sum(rate(scheduler_pod_scheduling_sli_duration_seconds_bucket{job="kube-scheduler"}[5m]))
+        without(instance,pod))
+      labels:
+        quantile: '0.9'
+      record: cluster_quantile:scheduler_pod_scheduling_sli_duration_seconds:histogram_quantile
+    - expr: histogram_quantile(0.5, sum(rate(scheduler_scheduling_attempt_duration_seconds_bucket{job="kube-scheduler"}[5m]))
+        without(instance,pod))
+      labels:
+        quantile: '0.5'
+      record: cluster_quantile:scheduler_scheduling_attempt_duration_seconds:histogram_quantile
+    - expr: histogram_quantile(0.5, sum(rate(scheduler_scheduling_algorithm_duration_seconds_bucket{job="kube-scheduler"}[5m]))
+        without(instance,pod))
+      labels:
+        quantile: '0.5'
+      record: cluster_quantile:scheduler_scheduling_algorithm_duration_seconds:histogram_quantile
+    - expr: histogram_quantile(0.5, sum(rate(scheduler_pod_scheduling_sli_duration_seconds_bucket{job="kube-scheduler"}[5m]))
+        without(instance,pod))
+      labels:
+        quantile: '0.5'
+      record: cluster_quantile:scheduler_pod_scheduling_sli_duration_seconds:histogram_quantile
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  labels:
+    app.kubernetes.io/instance: vmks
+    app.kubernetes.io/managed-by: sync-job
+  name: vmks-rule-node-rules
+  namespace: monitoring
+spec:
+  groups:
+  - name: node.rules
+    rules:
+    - expr: topk(1, max(label_replace(kube_pod_info{job="kube-state-metrics",node!=""},
+        "pod", "$1", "pod", "(.*)")) by(cluster,node,namespace,pod)) by(cluster,namespace,pod)
+      record: 'node_namespace_pod:kube_pod_info:'
+    - expr: count(node_cpu_seconds_total{mode="idle",job="node-exporter"} * on(cluster,namespace,pod)
+        group_left(node) topk(1, node_namespace_pod:kube_pod_info:) by(cluster,namespace,pod))
+        by(cluster,node)
+      record: node:node_num_cpu:sum
+    - expr: sum(node_memory_MemAvailable_bytes{job="node-exporter"} or (((node_memory_Buffers_bytes{job="node-exporter"}
+        + node_memory_Cached_bytes{job="node-exporter"}) + node_memory_MemFree_bytes{job="node-exporter"})
+        + node_memory_Slab_bytes{job="node-exporter"})) by(cluster)
+      record: :node_memory_MemAvailable_bytes:sum
+    - expr: avg(sum(rate(node_cpu_seconds_total{mode!="idle",mode!="iowait",mode!="steal",job="node-exporter"}[5m]))
+        without(mode)) by(cluster,node)
+      record: node:node_cpu_utilization:ratio_rate5m
+    - expr: avg(node:node_cpu_utilization:ratio_rate5m) by(cluster)
+      record: cluster:node_cpu:ratio_rate5m
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  labels:
+    app.kubernetes.io/instance: vmks
+    app.kubernetes.io/managed-by: sync-job
+  name: vmks-rule-kubelet-rules
+  namespace: monitoring
+spec:
+  groups:
+  - name: kubelet.rules
+    rules:
+    - expr: histogram_quantile(0.99, sum(rate(kubelet_pleg_relist_duration_seconds_bucket{job="kubelet",metrics_path="/metrics"}[5m]))
+        by(cluster,instance,le) * on(cluster,instance) group_left(node) max(kubelet_node_name{job="kubelet",metrics_path="/metrics"})
+        by(cluster,instance,node))
+      labels:
+        quantile: '0.99'
+      record: node_quantile:kubelet_pleg_relist_duration_seconds:histogram_quantile
+    - expr: histogram_quantile(0.9, sum(rate(kubelet_pleg_relist_duration_seconds_bucket{job="kubelet",metrics_path="/metrics"}[5m]))
+        by(cluster,instance,le) * on(cluster,instance) group_left(node) max(kubelet_node_name{job="kubelet",metrics_path="/metrics"})
+        by(cluster,instance,node))
+      labels:
+        quantile: '0.9'
+      record: node_quantile:kubelet_pleg_relist_duration_seconds:histogram_quantile
+    - expr: histogram_quantile(0.5, sum(rate(kubelet_pleg_relist_duration_seconds_bucket{job="kubelet",metrics_path="/metrics"}[5m]))
+        by(cluster,instance,le) * on(cluster,instance) group_left(node) max(kubelet_node_name{job="kubelet",metrics_path="/metrics"})
+        by(cluster,instance,node))
+      labels:
+        quantile: '0.5'
+      record: node_quantile:kubelet_pleg_relist_duration_seconds:histogram_quantile
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  labels:
+    app.kubernetes.io/instance: vmks
+    app.kubernetes.io/managed-by: sync-job
+  name: vmks-rule-node-exporter
+  namespace: monitoring
+spec:
+  groups:
+  - name: node-exporter
+    rules:
+    - alert: NodeFilesystemSpaceFillingUp
+      annotations:
+        description: Filesystem on {{ $labels.device }}, mounted on {{ $labels.mountpoint
+          }}, at {{ $labels.instance }} has only {{ printf "%.2f" $value }}% available
+          space left and is filling up.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/node/nodefilesystemspacefillingup
+        summary: Filesystem is predicted to run out of space within the next 24 hours.
+      expr: ((((node_filesystem_avail_bytes{job="node-exporter",fstype!="",mountpoint!=""}
+        / node_filesystem_size_bytes{job="node-exporter",fstype!="",mountpoint!=""})
+        * 100) < 15) and (predict_linear(node_filesystem_avail_bytes{job="node-exporter",fstype!="",mountpoint!=""}[6h],
+        86400) < 0)) and (node_filesystem_readonly{job="node-exporter",fstype!="",mountpoint!=""}
+        == 0)
+      for: 1h
+      labels:
+        severity: warning
+    - alert: NodeFilesystemSpaceFillingUp
+      annotations:
+        description: Filesystem on {{ $labels.device }}, mounted on {{ $labels.mountpoint
+          }}, at {{ $labels.instance }} has only {{ printf "%.2f" $value }}% available
+          space left and is filling up fast.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/node/nodefilesystemspacefillingup
+        summary: Filesystem is predicted to run out of space within the next 4 hours.
+      expr: ((((node_filesystem_avail_bytes{job="node-exporter",fstype!="",mountpoint!=""}
+        / node_filesystem_size_bytes{job="node-exporter",fstype!="",mountpoint!=""})
+        * 100) < 10) and (predict_linear(node_filesystem_avail_bytes{job="node-exporter",fstype!="",mountpoint!=""}[6h],
+        14400) < 0)) and (node_filesystem_readonly{job="node-exporter",fstype!="",mountpoint!=""}
+        == 0)
+      for: 1h
+      labels:
+        severity: critical
+    - alert: NodeFilesystemAlmostOutOfSpace
+      annotations:
+        description: Filesystem on {{ $labels.device }}, mounted on {{ $labels.mountpoint
+          }}, at {{ $labels.instance }} has only {{ printf "%.2f" $value }}% available
+          space left.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/node/nodefilesystemalmostoutofspace
+        summary: Filesystem has less than 5% space left.
+      expr: (((node_filesystem_avail_bytes{job="node-exporter",fstype!="",mountpoint!=""}
+        / node_filesystem_size_bytes{job="node-exporter",fstype!="",mountpoint!=""})
+        * 100) < 5) and (node_filesystem_readonly{job="node-exporter",fstype!="",mountpoint!=""}
+        == 0)
+      for: 30m
+      labels:
+        severity: warning
+    - alert: NodeFilesystemAlmostOutOfSpace
+      annotations:
+        description: Filesystem on {{ $labels.device }}, mounted on {{ $labels.mountpoint
+          }}, at {{ $labels.instance }} has only {{ printf "%.2f" $value }}% available
+          space left.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/node/nodefilesystemalmostoutofspace
+        summary: Filesystem has less than 3% space left.
+      expr: (((node_filesystem_avail_bytes{job="node-exporter",fstype!="",mountpoint!=""}
+        / node_filesystem_size_bytes{job="node-exporter",fstype!="",mountpoint!=""})
+        * 100) < 3) and (node_filesystem_readonly{job="node-exporter",fstype!="",mountpoint!=""}
+        == 0)
+      for: 30m
+      labels:
+        severity: critical
+    - alert: NodeFilesystemFilesFillingUp
+      annotations:
+        description: Filesystem on {{ $labels.device }}, mounted on {{ $labels.mountpoint
+          }}, at {{ $labels.instance }} has only {{ printf "%.2f" $value }}% available
+          inodes left and is filling up.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/node/nodefilesystemfilesfillingup
+        summary: Filesystem is predicted to run out of inodes within the next 24 hours.
+      expr: ((((node_filesystem_files_free{job="node-exporter",fstype!="",mountpoint!=""}
+        / node_filesystem_files{job="node-exporter",fstype!="",mountpoint!=""}) *
+        100) < 40) and (predict_linear(node_filesystem_files_free{job="node-exporter",fstype!="",mountpoint!=""}[6h],
+        86400) < 0)) and (node_filesystem_readonly{job="node-exporter",fstype!="",mountpoint!=""}
+        == 0)
+      for: 1h
+      labels:
+        severity: warning
+    - alert: NodeFilesystemFilesFillingUp
+      annotations:
+        description: Filesystem on {{ $labels.device }}, mounted on {{ $labels.mountpoint
+          }}, at {{ $labels.instance }} has only {{ printf "%.2f" $value }}% available
+          inodes left and is filling up fast.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/node/nodefilesystemfilesfillingup
+        summary: Filesystem is predicted to run out of inodes within the next 4 hours.
+      expr: ((((node_filesystem_files_free{job="node-exporter",fstype!="",mountpoint!=""}
+        / node_filesystem_files{job="node-exporter",fstype!="",mountpoint!=""}) *
+        100) < 20) and (predict_linear(node_filesystem_files_free{job="node-exporter",fstype!="",mountpoint!=""}[6h],
+        14400) < 0)) and (node_filesystem_readonly{job="node-exporter",fstype!="",mountpoint!=""}
+        == 0)
+      for: 1h
+      labels:
+        severity: critical
+    - alert: NodeFilesystemAlmostOutOfFiles
+      annotations:
+        description: Filesystem on {{ $labels.device }}, mounted on {{ $labels.mountpoint
+          }}, at {{ $labels.instance }} has only {{ printf "%.2f" $value }}% available
+          inodes left.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/node/nodefilesystemalmostoutoffiles
+        summary: Filesystem has less than 5% inodes left.
+      expr: (((node_filesystem_files_free{job="node-exporter",fstype!="",mountpoint!=""}
+        / node_filesystem_files{job="node-exporter",fstype!="",mountpoint!=""}) *
+        100) < 5) and (node_filesystem_readonly{job="node-exporter",fstype!="",mountpoint!=""}
+        == 0)
+      for: 1h
+      labels:
+        severity: warning
+    - alert: NodeFilesystemAlmostOutOfFiles
+      annotations:
+        description: Filesystem on {{ $labels.device }}, mounted on {{ $labels.mountpoint
+          }}, at {{ $labels.instance }} has only {{ printf "%.2f" $value }}% available
+          inodes left.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/node/nodefilesystemalmostoutoffiles
+        summary: Filesystem has less than 3% inodes left.
+      expr: (((node_filesystem_files_free{job="node-exporter",fstype!="",mountpoint!=""}
+        / node_filesystem_files{job="node-exporter",fstype!="",mountpoint!=""}) *
+        100) < 3) and (node_filesystem_readonly{job="node-exporter",fstype!="",mountpoint!=""}
+        == 0)
+      for: 1h
+      labels:
+        severity: critical
+    - alert: NodeNetworkReceiveErrs
+      annotations:
+        description: '{{ $labels.instance }} interface {{ $labels.device }} has encountered
+          {{ printf "%.0f" $value }} receive errors in the last two minutes.'
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/node/nodenetworkreceiveerrs
+        summary: Network interface is reporting many receive errors.
+      expr: (rate(node_network_receive_errs_total{job="node-exporter"}[2m]) / rate(node_network_receive_packets_total{job="node-exporter"}[2m]))
+        > 0.01
+      for: 1h
+      labels:
+        severity: warning
+    - alert: NodeNetworkTransmitErrs
+      annotations:
+        description: '{{ $labels.instance }} interface {{ $labels.device }} has encountered
+          {{ printf "%.0f" $value }} transmit errors in the last two minutes.'
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/node/nodenetworktransmiterrs
+        summary: Network interface is reporting many transmit errors.
+      expr: (rate(node_network_transmit_errs_total{job="node-exporter"}[2m]) / rate(node_network_transmit_packets_total{job="node-exporter"}[2m]))
+        > 0.01
+      for: 1h
+      labels:
+        severity: warning
+    - alert: NodeHighNumberConntrackEntriesUsed
+      annotations:
+        description: '{{ $labels.instance }} {{ $value | humanizePercentage }} of
+          conntrack entries are used.'
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/node/nodehighnumberconntrackentriesused
+        summary: Number of conntrack are getting close to the limit.
+      expr: (node_nf_conntrack_entries{job="node-exporter"} / node_nf_conntrack_entries_limit)
+        > 0.75
+      labels:
+        severity: warning
+    - alert: NodeTextFileCollectorScrapeError
+      annotations:
+        description: Node Exporter text file collector on {{ $labels.instance }} failed
+          to scrape.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/node/nodetextfilecollectorscrapeerror
+        summary: Node Exporter text file collector failed to scrape.
+      expr: node_textfile_scrape_error{job="node-exporter"} == 1
+      labels:
+        severity: warning
+    - alert: NodeClockSkewDetected
+      annotations:
+        description: Clock at {{ $labels.instance }} is out of sync by more than 0.05s.
+          Ensure NTP is configured correctly on this host.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/node/nodeclockskewdetected
+        summary: Clock skew detected.
+      expr: ((node_timex_offset_seconds{job="node-exporter"} > 0.05) and (deriv(node_timex_offset_seconds{job="node-exporter"}[5m])
+        >= 0)) or ((node_timex_offset_seconds{job="node-exporter"} < -0.05) and (deriv(node_timex_offset_seconds{job="node-exporter"}[5m])
+        <= 0))
+      for: 10m
+      labels:
+        severity: warning
+    - alert: NodeClockNotSynchronising
+      annotations:
+        description: Clock at {{ $labels.instance }} is not synchronising. Ensure
+          NTP is configured on this host.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/node/nodeclocknotsynchronising
+        summary: Clock not synchronising.
+      expr: (min_over_time(node_timex_sync_status{job="node-exporter"}[5m]) == 0)
+        and (node_timex_maxerror_seconds{job="node-exporter"} >= 16)
+      for: 10m
+      labels:
+        severity: warning
+    - alert: NodeRAIDDegraded
+      annotations:
+        description: RAID array '{{ $labels.device }}' at {{ $labels.instance }} is
+          in degraded state due to one or more disks failures. Number of spare drives
+          is insufficient to fix issue automatically.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/node/noderaiddegraded
+        summary: RAID Array is degraded.
+      expr: (node_md_disks_required{job="node-exporter",device=~"(/dev/)?(mmcblk.p.+|nvme.+|rbd.+|sd.+|vd.+|xvd.+|dm-.+|md.+|dasd.+)"}
+        - ignoring(state) node_md_disks{state="active",job="node-exporter",device=~"(/dev/)?(mmcblk.p.+|nvme.+|rbd.+|sd.+|vd.+|xvd.+|dm-.+|md.+|dasd.+)"})
+        > 0
+      for: 15m
+      labels:
+        severity: critical
+    - alert: NodeRAIDDiskFailure
+      annotations:
+        description: At least one device in RAID array at {{ $labels.instance }} failed.
+          Array '{{ $labels.device }}' needs attention and possibly a disk swap.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/node/noderaiddiskfailure
+        summary: Failed device in RAID array.
+      expr: node_md_disks{state="failed",job="node-exporter",device=~"(/dev/)?(mmcblk.p.+|nvme.+|rbd.+|sd.+|vd.+|xvd.+|dm-.+|md.+|dasd.+)"}
+        > 0
+      labels:
+        severity: warning
+    - alert: NodeFileDescriptorLimit
+      annotations:
+        description: File descriptors limit at {{ $labels.instance }} is currently
+          at {{ printf "%.2f" $value }}%.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/node/nodefiledescriptorlimit
+        summary: Kernel is predicted to exhaust file descriptors limit soon.
+      expr: ((node_filefd_allocated{job="node-exporter"} * 100) / node_filefd_maximum{job="node-exporter"})
+        > 70
+      for: 15m
+      labels:
+        severity: warning
+    - alert: NodeFileDescriptorLimit
+      annotations:
+        description: File descriptors limit at {{ $labels.instance }} is currently
+          at {{ printf "%.2f" $value }}%.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/node/nodefiledescriptorlimit
+        summary: Kernel is predicted to exhaust file descriptors limit soon.
+      expr: ((node_filefd_allocated{job="node-exporter"} * 100) / node_filefd_maximum{job="node-exporter"})
+        > 90
+      for: 15m
+      labels:
+        severity: critical
+    - alert: NodeCPUHighUsage
+      annotations:
+        description: 'CPU usage at {{ $labels.instance }} has been above 90% for the
+          last 15 minutes, is currently at {{ printf "%.2f" $value }}%.
+
+          '
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/node/nodecpuhighusage
+        summary: High CPU usage.
+      expr: (sum(avg(rate(node_cpu_seconds_total{job="node-exporter",mode!~"idle|iowait"}[2m]))
+        without(cpu)) without(mode) * 100) > 90
+      for: 15m
+      labels:
+        severity: info
+    - alert: NodeSystemSaturation
+      annotations:
+        description: 'System load per core at {{ $labels.instance }} has been above
+          2 for the last 15 minutes, is currently at {{ printf "%.2f" $value }}.
+
+          This might indicate this instance resources saturation and can cause it
+          becoming unresponsive.
+
+          '
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/node/nodesystemsaturation
+        summary: System saturated, load per core is very high.
+      expr: (node_load1{job="node-exporter"} / count(node_cpu_seconds_total{job="node-exporter",mode="idle"})
+        without(cpu,mode)) > 2
+      for: 15m
+      labels:
+        severity: warning
+    - alert: NodeMemoryMajorPagesFaults
+      annotations:
+        description: 'Memory major pages are occurring at very high rate at {{ $labels.instance
+          }}, 500 major page faults per second for the last 15 minutes, is currently
+          at {{ printf "%.2f" $value }}.
+
+          Please check that there is enough memory available at this instance.
+
+          '
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/node/nodememorymajorpagesfaults
+        summary: Memory major page faults are occurring at very high rate.
+      expr: rate(node_vmstat_pgmajfault{job="node-exporter"}[5m]) > 500
+      for: 15m
+      labels:
+        severity: warning
+    - alert: NodeMemoryHighUtilization
+      annotations:
+        description: 'Memory is filling up at {{ $labels.instance }}, has been above
+          90% for the last 15 minutes, is currently at {{ printf "%.2f" $value }}%.
+
+          '
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/node/nodememoryhighutilization
+        summary: Host is running out of memory.
+      expr: (100 - ((node_memory_MemAvailable_bytes{job="node-exporter"} / node_memory_MemTotal_bytes{job="node-exporter"})
+        * 100)) > 90
+      for: 15m
+      labels:
+        severity: warning
+    - alert: NodeDiskIOSaturation
+      annotations:
+        description: 'Disk IO queue (aqu-sq) is high on {{ $labels.device }} at {{
+          $labels.instance }}, has been above 10 for the last 30 minutes, is currently
+          at {{ printf "%.2f" $value }}.
+
+          This symptom might indicate disk saturation.
+
+          '
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/node/nodediskiosaturation
+        summary: Disk IO queue is high.
+      expr: rate(node_disk_io_time_weighted_seconds_total{job="node-exporter",device=~"(/dev/)?(mmcblk.p.+|nvme.+|rbd.+|sd.+|vd.+|xvd.+|dm-.+|md.+|dasd.+)"}[5m])
+        > 10
+      for: 30m
+      labels:
+        severity: warning
+    - alert: NodeSystemdServiceFailed
+      annotations:
+        description: Systemd service {{ $labels.name }} has entered failed state at
+          {{ $labels.instance }}
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/node/nodesystemdservicefailed
+        summary: Systemd service has entered failed state.
+      expr: node_systemd_unit_state{job="node-exporter",state="failed"} == 1
+      for: 5m
+      labels:
+        severity: warning
+    - alert: NodeSystemdServiceCrashlooping
+      annotations:
+        description: Systemd service {{ $labels.name }} has being restarted too many
+          times at {{ $labels.instance }} for the last 15 minutes. Please check if
+          service is crash looping.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/node/nodesystemdservicecrashlooping
+        summary: Systemd service keeps restaring, possibly crash looping.
+      expr: increase(node_systemd_service_restart_total{job="node-exporter"}[5m])
+        > 2
+      for: 15m
+      labels:
+        severity: warning
+    - alert: NodeBondingDegraded
+      annotations:
+        description: Bonding interface {{ $labels.master }} on {{ $labels.instance
+          }} is in degraded state due to one or more slave failures.
+        runbook_url: https://runbooks.prometheus-operator.dev/runbooks/node/nodebondingdegraded
+        summary: Bonding interface is degraded.
+      expr: (node_bonding_slaves{job="node-exporter"} - node_bonding_active{job="node-exporter"})
+        != 0
+      for: 5m
+      labels:
+        severity: warning
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  labels:
+    app.kubernetes.io/instance: vmks
+    app.kubernetes.io/managed-by: sync-job
+  name: vmks-rule-node-exporter-rules
+  namespace: monitoring
+spec:
+  groups:
+  - name: node-exporter.rules
+    rules:
+    - expr: count(node_cpu_seconds_total{job="node-exporter",mode="idle"}) without(cpu,mode)
+      record: instance:node_num_cpu:sum
+    - expr: 1 - avg(sum(rate(node_cpu_seconds_total{job="node-exporter",mode=~"idle|iowait|steal"}[5m]))
+        without(mode)) without(cpu)
+      record: instance:node_cpu_utilisation:rate5m
+    - expr: node_load1{job="node-exporter"} / instance:node_num_cpu:sum{job="node-exporter"}
+      record: instance:node_load1_per_cpu:ratio
+    - expr: 1 - ((node_memory_MemAvailable_bytes{job="node-exporter"} or (((node_memory_Buffers_bytes{job="node-exporter"}
+        + node_memory_Cached_bytes{job="node-exporter"}) + node_memory_MemFree_bytes{job="node-exporter"})
+        + node_memory_Slab_bytes{job="node-exporter"})) / node_memory_MemTotal_bytes{job="node-exporter"})
+      record: instance:node_memory_utilisation:ratio
+    - expr: rate(node_vmstat_pgmajfault{job="node-exporter"}[5m])
+      record: instance:node_vmstat_pgmajfault:rate5m
+    - expr: rate(node_disk_io_time_seconds_total{job="node-exporter",device=~"(/dev/)?(mmcblk.p.+|nvme.+|rbd.+|sd.+|vd.+|xvd.+|dm-.+|md.+|dasd.+)"}[5m])
+      record: instance_device:node_disk_io_time_seconds:rate5m
+    - expr: rate(node_disk_io_time_weighted_seconds_total{job="node-exporter",device=~"(/dev/)?(mmcblk.p.+|nvme.+|rbd.+|sd.+|vd.+|xvd.+|dm-.+|md.+|dasd.+)"}[5m])
+      record: instance_device:node_disk_io_time_weighted_seconds:rate5m
+    - expr: sum(rate(node_network_receive_bytes_total{job="node-exporter",device!="lo"}[5m]))
+        without(device)
+      record: instance:node_network_receive_bytes_excluding_lo:rate5m
+    - expr: sum(rate(node_network_transmit_bytes_total{job="node-exporter",device!="lo"}[5m]))
+        without(device)
+      record: instance:node_network_transmit_bytes_excluding_lo:rate5m
+    - expr: sum(rate(node_network_receive_drop_total{job="node-exporter",device!="lo"}[5m]))
+        without(device)
+      record: instance:node_network_receive_drop_excluding_lo:rate5m
+    - expr: sum(rate(node_network_transmit_drop_total{job="node-exporter",device!="lo"}[5m]))
+        without(device)
+      record: instance:node_network_transmit_drop_excluding_lo:rate5m
+    - expr: sum(rate(node_network_receive_bytes_total{job="node-exporter",device!~"lo|veth.+"}[5m]))
+        without(device)
+      record: instance:node_network_receive_bytes_physical:rate5m
+    - expr: sum(rate(node_network_transmit_bytes_total{job="node-exporter",device!~"lo|veth.+"}[5m]))
+        without(device)
+      record: instance:node_network_transmit_bytes_physical:rate5m
+    - expr: sum(rate(node_network_receive_drop_total{job="node-exporter",device!~"lo|veth.+"}[5m]))
+        without(device)
+      record: instance:node_network_receive_drop_physical:rate5m
+    - expr: sum(rate(node_network_transmit_drop_total{job="node-exporter",device!~"lo|veth.+"}[5m]))
+        without(device)
+      record: instance:node_network_transmit_drop_physical:rate5m
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  labels:
+    app.kubernetes.io/instance: vmks
+    app.kubernetes.io/managed-by: sync-job
+  name: vmks-rule-vmagent
+  namespace: monitoring
+spec:
+  groups:
+  - concurrency: 2
+    interval: 30s
+    name: vmagent
+    rules:
+    - alert: PersistentQueueIsDroppingData
+      annotations:
+        dashboard: '{{ $externalURL }}/d/G7Z9GzMGz?viewPanel=49&var-instance={{ $labels.instance
+          }}'
+        description: Vmagent dropped {{ $value | humanize1024 }} from persistent queue
+          on instance {{ $labels.instance }} for the last 10m.
+        summary: Instance {{ $labels.instance }} is dropping data from persistent
+          queue
+      expr: sum(increase(vm_persistentqueue_bytes_dropped_total[5m])) without(path,name)
+        > 0
+      for: 10m
+      labels:
+        severity: critical
+    - alert: RejectedRemoteWriteDataBlocksAreDropped
+      annotations:
+        dashboard: '{{ $externalURL }}/d/G7Z9GzMGz?viewPanel=79&var-instance={{ $labels.instance
+          }}'
+        description: Job "{{ $labels.job }}" on instance {{ $labels.instance }} drops
+          the rejected by remote-write server data blocks. Check the logs to find
+          the reason for rejects.
+        summary: Vmagent is dropping data blocks that are rejected by remote storage
+      expr: sum(increase(vmagent_remotewrite_packets_dropped_total[5m])) without(url)
+        > 0
+      for: 15m
+      labels:
+        severity: warning
+    - alert: TooManyScrapeErrors
+      annotations:
+        dashboard: '{{ $externalURL }}/d/G7Z9GzMGz?viewPanel=31&var-instance={{ $labels.instance
+          }}'
+        description: Job "{{ $labels.job }}" on instance {{ $labels.instance }} fails
+          to scrape targets for last 15m
+        summary: Vmagent fails to scrape one or more targets
+      expr: increase(vm_promscrape_scrapes_failed_total[5m]) > 0
+      for: 15m
+      labels:
+        severity: warning
+    - alert: ScrapePoolHasNoTargets
+      annotations:
+        description: Vmagent "{{ $labels.job }}" has scrape_pool "{{ $labels.scrape_job
+          }}" with 0 discovered targets. It is likely a misconfiguration. Please follow
+          https://docs.victoriametrics.com/victoriametrics/vmagent/#debugging-scrape-targets
+          to troubleshoot the scraping config.
+        summary: Vmagent has scrape_pool with 0 configured/discovered targets
+      expr: sum(vm_promscrape_scrape_pool_targets) without(status,instance,pod) ==
+        0
+      for: 30m
+      labels:
+        severity: warning
+    - alert: TooManyWriteErrors
+      annotations:
+        dashboard: '{{ $externalURL }}/d/G7Z9GzMGz?viewPanel=77&var-instance={{ $labels.instance
+          }}'
+        description: Job "{{ $labels.job }}" on instance {{ $labels.instance }} responds
+          with errors to write requests for last 15m.
+        summary: Vmagent responds with too many errors on data ingestion protocols
+      expr: (sum(increase(vm_ingestserver_request_errors_total[5m])) without(name,net,type)
+        + sum(increase(vmagent_http_request_errors_total[5m])) without(path,protocol))
+        > 0
+      for: 15m
+      labels:
+        severity: warning
+    - alert: TooManyRemoteWriteErrors
+      annotations:
+        dashboard: '{{ $externalURL }}/d/G7Z9GzMGz?viewPanel=61&var-instance={{ $labels.instance
+          }}'
+        description: "Vmagent fails to push data via remote write protocol to destination\
+          \ \"{{ $labels.url }}\"\n Ensure that destination is up and reachable."
+        summary: Job "{{ $labels.job }}" on instance {{ $labels.instance }} fails
+          to push to remote storage
+      expr: rate(vmagent_remotewrite_retries_count_total[5m]) > 0
+      for: 15m
+      labels:
+        severity: warning
+    - alert: RemoteWriteConnectionIsSaturated
+      annotations:
+        dashboard: '{{ $externalURL }}/d/G7Z9GzMGz?viewPanel=84&var-instance={{ $labels.instance
+          }}'
+        description: "The remote write connection between vmagent \"{{ $labels.job\
+          \ }}\" (instance {{ $labels.instance }}) and destination \"{{ $labels.url\
+          \ }}\" is saturated by more than 90% and vmagent won't be able to keep up.\n\
+          \ There could be the following reasons for this:\n * vmagent can't send\
+          \ data fast enough through the existing network connections. Increase `-remoteWrite.queues`\
+          \ cmd-line flag value to establish more connections per destination.\n *\
+          \ remote destination can't accept data fast enough. Check if remote destination\
+          \ has enough resources for processing."
+        summary: Remote write connection from "{{ $labels.job }}" (instance {{ $labels.instance
+          }}) to {{ $labels.url }} is saturated
+      expr: (rate(vmagent_remotewrite_send_duration_seconds_total[5m]) / vmagent_remotewrite_queues)
+        > 0.9
+      for: 15m
+      labels:
+        severity: warning
+    - alert: PersistentQueueForWritesIsSaturated
+      annotations:
+        dashboard: '{{ $externalURL }}/d/G7Z9GzMGz?viewPanel=98&var-instance={{ $labels.instance
+          }}'
+        description: Persistent queue writes for vmagent "{{ $labels.job }}" (instance
+          {{ $labels.instance }}) are saturated by more than 90% and vmagent won't
+          be able to keep up with flushing data on disk. In this case, consider to
+          decrease load on the vmagent or improve the disk throughput.
+        summary: Persistent queue writes for instance {{ $labels.instance }} are saturated
+      expr: rate(vm_persistentqueue_write_duration_seconds_total[5m]) > 0.9
+      for: 15m
+      labels:
+        severity: warning
+    - alert: PersistentQueueForReadsIsSaturated
+      annotations:
+        dashboard: '{{ $externalURL }}/d/G7Z9GzMGz?viewPanel=99&var-instance={{ $labels.instance
+          }}'
+        description: Persistent queue reads for vmagent "{{ $labels.job }}" (instance
+          {{ $labels.instance }}) are saturated by more than 90% and vmagent won't
+          be able to keep up with reading data from the disk. In this case, consider
+          to decrease load on the vmagent or improve the disk throughput.
+        summary: Persistent queue reads for instance {{ $labels.instance }} are saturated
+      expr: rate(vm_persistentqueue_read_duration_seconds_total[5m]) > 0.9
+      for: 15m
+      labels:
+        severity: warning
+    - alert: SeriesLimitHourReached
+      annotations:
+        dashboard: '{{ $externalURL }}/d/G7Z9GzMGz?viewPanel=88&var-instance={{ $labels.instance
+          }}'
+        description: Max series limit set via -remoteWrite.maxHourlySeries flag is
+          close to reaching the max value. Then samples for new time series will be
+          dropped instead of sending them to remote storage systems.
+        summary: Instance {{ $labels.instance }} reached 90% of the limit
+      expr: (vmagent_hourly_series_limit_current_series / vmagent_hourly_series_limit_max_series)
+        > 0.9
+      labels:
+        severity: critical
+    - alert: SeriesLimitDayReached
+      annotations:
+        dashboard: '{{ $externalURL }}/d/G7Z9GzMGz?viewPanel=90&var-instance={{ $labels.instance
+          }}'
+        description: Max series limit set via -remoteWrite.maxDailySeries flag is
+          close to reaching the max value. Then samples for new time series will be
+          dropped instead of sending them to remote storage systems.
+        summary: Instance {{ $labels.instance }} reached 90% of the limit
+      expr: (vmagent_daily_series_limit_current_series / vmagent_daily_series_limit_max_series)
+        > 0.9
+      labels:
+        severity: critical
+    - alert: ConfigurationReloadFailure
+      annotations:
+        description: Configuration hot-reload failed for vmagent on instance {{ $labels.instance
+          }}. Check vmagent's logs for detailed error message.
+        summary: Configuration reload failed for vmagent instance {{ $labels.instance
+          }}
+      expr: (vm_promscrape_config_last_reload_successful != 1) or (vmagent_relabel_config_last_reload_successful
+        != 1)
+      labels:
+        severity: warning
+    - alert: StreamAggrFlushTimeout
+      annotations:
+        description: 'Stream aggregation process can''t keep up with the load and
+          might produce incorrect aggregation results. Check logs for more details.
+          Possible solutions: increase aggregation interval; aggregate smaller number
+          of series; reduce samples'' ingestion rate to stream aggregation.'
+        summary: Streaming aggregation at "{{ $labels.job }}" (instance {{ $labels.instance
+          }}) can't be finished within the configured aggregation interval.
+      expr: increase(vm_streamaggr_flush_timeouts_total[5m]) > 0
+      labels:
+        severity: warning
+    - alert: StreamAggrDedupFlushTimeout
+      annotations:
+        description: 'Deduplication process can''t keep up with the load and might
+          produce incorrect results. Check docs https://docs.victoriametrics.com/victoriametrics/stream-aggregation/#deduplication
+          and logs for more details. Possible solutions: increase deduplication interval;
+          deduplicate smaller number of series; reduce samples'' ingestion rate.'
+        summary: Deduplication "{{ $labels.job }}" (instance {{ $labels.instance }})
+          can't be finished within configured deduplication interval.
+      expr: increase(vm_streamaggr_dedup_flush_timeouts_total[5m]) > 0
+      labels:
+        severity: warning
+    - alert: PersistentQueueRunsOutOfSpaceIn12Hours
+      annotations:
+        description: RemoteWrite destination ({{ $labels.url }}) is unavailable or
+          unable to receive data in a timely manner, so the persistent queue size
+          is growing. Once the available space is exhausted, some samples will be
+          discarded and cause incident. Please check the health of remoteWrite destination
+          ({{ $labels.url }}).
+        summary: Persistent Queue (url {{ $labels.url }}) of {{ $labels.instance }}
+          (job:{{ $labels.job }}) will run out of space in 12 hours.
+      expr: (((sum(vm_persistentqueue_free_disk_space_bytes) by(job,instance,path)
+        / (sum(deriv(vm_persistentqueue_bytes_pending[1m])) by(job,instance,path)
+        > 0)) * on(job,instance,path) group_left(url) ((vmagent_remotewrite_pending_data_bytes
+        * 0) + 1)) < 43200) > 0
+      for: 10m
+      labels:
+        severity: warning
+    - alert: PersistentQueueRunsOutOfSpaceIn4Hours
+      annotations:
+        description: RemoteWrite destination ({{ $labels.url }}) is unavailable or
+          unable to receive data in a timely manner, so the persistent queue size
+          is growing. Once the available space is exhausted, some samples will be
+          discarded and cause incident. Please check the health of remoteWrite destination
+          ({{ $labels.url }}).
+        summary: Persistent Queue (url {{ $labels.url }}) of {{ $labels.instance }}
+          (job:{{ $labels.job }}) will run out of space in 4 hours.
+      expr: (((sum(vm_persistentqueue_free_disk_space_bytes) by(job,instance,path)
+        / (sum(deriv(vm_persistentqueue_bytes_pending[1m])) by(job,instance,path)
+        > 0)) * on(job,instance,path) group_left(url) ((vmagent_remotewrite_pending_data_bytes
+        * 0) + 1)) < 14400) > 0
+      for: 10m
+      labels:
+        severity: critical
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  labels:
+    app.kubernetes.io/instance: vmks
+    app.kubernetes.io/managed-by: sync-job
+  name: vmks-rule-vmalert
+  namespace: monitoring
+spec:
+  groups:
+  - interval: 30s
+    name: vmalert
+    rules:
+    - alert: ConfigurationReloadFailure
+      annotations:
+        description: Configuration hot-reload failed for vmalert on instance {{ $labels.instance
+          }}. Check vmalert's logs for detailed error message.
+        summary: Configuration reload failed for vmalert instance {{ $labels.instance
+          }}
+      expr: vmalert_config_last_reload_successful != 1
+      labels:
+        severity: warning
+    - alert: AlertingRulesError
+      annotations:
+        dashboard: '{{ $externalURL }}/d/LzldHAVnz?viewPanel=13&var-instance={{ $labels.instance
+          }}&var-file={{ $labels.file }}&var-group={{ $labels.group }}'
+        description: Alerting rules execution is failing for "{{ $labels.alertname
+          }}" from group "{{ $labels.group }}" in file "{{ $labels.file }}". Check
+          vmalert's logs for detailed error message.
+        summary: Alerting rules are failing for vmalert instance {{ $labels.instance
+          }}
+      expr: sum(increase(vmalert_alerting_rules_errors_total[5m])) without(id) > 0
+      for: 5m
+      labels:
+        severity: warning
+    - alert: RecordingRulesError
+      annotations:
+        dashboard: '{{ $externalURL }}/d/LzldHAVnz?viewPanel=30&var-instance={{ $labels.instance
+          }}&var-file={{ $labels.file }}&var-group={{ $labels.group }}'
+        description: Recording rules execution is failing for "{{ $labels.recording
+          }}" from group "{{ $labels.group }}" in file "{{ $labels.file }}". Check
+          vmalert's logs for detailed error message.
+        summary: Recording rules are failing for vmalert instance {{ $labels.instance
+          }}
+      expr: sum(increase(vmalert_recording_rules_errors_total[5m])) without(id) >
+        0
+      for: 5m
+      labels:
+        severity: warning
+    - alert: RecordingRulesNoData
+      annotations:
+        dashboard: '{{ $externalURL }}/d/LzldHAVnz?viewPanel=33&var-file={{ $labels.file
+          }}&var-group={{ $labels.group }}'
+        description: Recording rule "{{ $labels.recording }}" from group "{{ $labels.group
+          }} in file "{{ $labels.file }}" produces 0 samples over the last 30min.
+          It might be caused by a misconfiguration or incorrect query expression.
+        summary: Recording rule {{ $labels.recording }} ({{ $labels.group }}) produces
+          no data
+      expr: sum(vmalert_recording_rules_last_evaluation_samples) without(id) < 1
+      for: 30m
+      labels:
+        severity: info
+    - alert: TooManyMissedIterations
+      annotations:
+        description: vmalert instance {{ $labels.instance }} is missing rules evaluations
+          for group "{{ $labels.group }}" in file "{{ $labels.file }}". The group
+          evaluation time takes longer than the configured evaluation interval. This
+          may result in missed alerting notifications or recording rules samples.
+          Try increasing evaluation interval or concurrency of group "{{ $labels.group
+          }}". See https://docs.victoriametrics.com/victoriametrics/vmalert/#groups.
+          If rule expressions are taking longer than expected, please see https://docs.victoriametrics.com/victoriametrics/troubleshooting/#slow-queries.
+        summary: vmalert instance {{ $labels.instance }} is missing rules evaluations
+      expr: increase(vmalert_iteration_missed_total[5m]) > 0
+      for: 15m
+      labels:
+        severity: warning
+    - alert: GroupIterationReset
+      annotations:
+        description: Evaluation iteration for group "{{ $labels.group }}" in file
+          "{{ $labels.file }}" is reset on vmalert instance {{ $labels.instance }}.
+          This can be caused by irregular delays during evaluation or by the system
+          wall clock being moved backward. If it is caused by host clock changes,
+          vmalert could generate duplicate results for the group rules since some
+          evaluations could be repeated. Check host clock time synchronization configurations
+          if this happens frequently.
+        summary: Evaluation iteration for group {{ $labels.group }} in file {{ $labels.file
+          }} is reset
+      expr: increase(vmalert_iteration_reset_total[5m]) > 0
+      for: 5m
+      labels:
+        severity: warning
+    - alert: RemoteWriteErrors
+      annotations:
+        description: vmalert instance {{ $labels.instance }} is failing to push metrics
+          generated via alerting or recording rules to the configured remote write
+          URL. Check vmalert's logs for detailed error message.
+        summary: vmalert instance {{ $labels.instance }} is failing to push metrics
+          to remote write URL
+      expr: increase(vmalert_remotewrite_errors_total[5m]) > 0
+      for: 15m
+      labels:
+        severity: warning
+    - alert: RemoteWriteDroppingData
+      annotations:
+        description: vmalert instance {{ $labels.instance }} is failing to send results
+          of alerting or recording rules to the configured remote write URL. This
+          may result into gaps in recording rules or alerts state. Check vmalert's
+          logs for detailed error message.
+        summary: vmalert instance {{ $labels.instance }} is dropping data sent to
+          remote write URL
+      expr: increase(vmalert_remotewrite_dropped_rows_total[5m]) > 0
+      for: 5m
+      labels:
+        severity: critical
+    - alert: RemoteWriteQueueHighUsage
+      annotations:
+        description: 'The remote write queue on vmalert instance {{ $labels.instance
+          }} has consistently high utilization. The queue acts as a buffer between
+          rules generating series and remote-write client consuming and pushing these
+          series. When queue overflows, vmalert will start dropping newly generated
+          series. Queue may overflow due to multiple reasons: 1. Some bad rules produce
+          too many series at once. This can be limited using the global `-rule.resultsLimit`
+          flag or `limit` param at the rule group level. 2. Remote write connection
+          is slow.  Increase `-remoteWrite.concurrency`,  so vmalert could establish
+          more concurrent connections. 3. The queue size is too small. Increase `-remoteWrite.maxQueueSize`
+          to extend the buffer size. Note that a larger queue will result in higher
+          memory consumption when the queue is full.'
+        summary: Remote write queue capacity on the vmalert instance {{ $labels.instance
+          }} has exceeded 80% utilization
+      expr: (histogram_quantile(0.99, sum(increase(vmalert_remotewrite_queue_size_bucket[5m]))
+        by(job,instance,vmrange)) / vmalert_remotewrite_queue_capacity) > 0.8
+      for: 15m
+      labels:
+        severity: warning
+    - alert: AlertmanagerErrors
+      annotations:
+        description: vmalert instance {{ $labels.instance }} is failing to send alert
+          notifications to "{{ $labels.addr }}". Check vmalert's logs for detailed
+          error message.
+        summary: vmalert instance {{ $labels.instance }} is failing to send notifications
+          to Alertmanager
+      expr: increase(vmalert_alerts_send_errors_total[5m]) > 0
+      for: 15m
+      labels:
+        severity: warning
+    - alert: AlertingRuleResultsApproachingLimit
+      annotations:
+        description: Alerting rule "{{ $labels.alertname }}" from group "{{ $labels.group
+          }}" in file "{{ $labels.file }}" produced {{ $value }} samples in last evaluation,
+          which approaches the configured results limit. If the produced results exceed
+          the limit, the rule will be marked with an error and all its results will
+          be discarded. Try increasing the results limit for the group or reducing
+          the number of series produced by the rule. See https://docs.victoriametrics.com/victoriametrics/vmalert/#groups.
+        summary: Alerting rule {{ $labels.alertname }} in group {{ $labels.group }}
+          is approaching the configured results limit
+      expr: (vmalert_alerting_rules_last_evaluation_samples > on(group,file) group_left()
+        min(vmalert_group_rule_results_limit * 0.9) by(group,file)) and on(group,file)
+        (min(vmalert_group_rule_results_limit) by(group,file) > 0)
+      for: 5m
+      labels:
+        severity: warning
+    - alert: RecordingRuleResultsApproachingLimit
+      annotations:
+        description: Recording rule "{{ $labels.recording }}" from group "{{ $labels.group
+          }}" in file "{{ $labels.file }}" produced {{ $value }} samples in last evaluation,
+          which approaches the configured results limit. If the produced results exceed
+          the limit, the rule will be marked with an error and all its results will
+          be discarded. Try increasing the results limit for the group or reducing
+          the number of series produced by the rule. See https://docs.victoriametrics.com/victoriametrics/vmalert/#groups.
+        summary: Recording rule {{ $labels.recording }} in group {{ $labels.group
+          }} is approaching the configured results limit
+      expr: (vmalert_recording_rules_last_evaluation_samples > on(group,file) group_left()
+        min(vmalert_group_rule_results_limit * 0.9) by(group,file)) and on(group,file)
+        (min(vmalert_group_rule_results_limit) by(group,file) > 0)
+      for: 5m
+      labels:
+        severity: warning
+---
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  labels:
+    app.kubernetes.io/instance: vmks
+    app.kubernetes.io/managed-by: sync-job
+  name: vmks-rule-vmoperator
+  namespace: monitoring
+spec:
+  groups:
+  - name: vmoperator
+    rules:
+    - alert: LogErrors
+      annotations:
+        dashboard: '{{ $externalURL }}/d/1H179hunk/victoriametrics-operator?ds={{
+          $labels.dc }}&orgId=1&viewPanel=16'
+        description: 'Operator has too many errors at logs: {{ $value}}, check operator
+          logs'
+        summary: 'Too many errors at logs of operator: {{ $value}}'
+      expr: sum(rate(operator_log_messages_total{level="error",job=~".*((victoria.*)|vm)-?operator"}[5m]))
+        by(cluster) > 0
+      for: 15m
+      labels:
+        severity: warning
+        show_at: dashboard
+    - alert: ReconcileErrors
+      annotations:
+        dashboard: '{{ $externalURL }}/d/1H179hunk/victoriametrics-operator?ds={{
+          $labels.dc }}&orgId=1&viewPanel=10'
+        description: 'Operator cannot parse response from k8s api server, possible
+          bug: {{ $value }}, check operator logs'
+        summary: 'Too many errors at reconcile loop of operator: {{ $value}}'
+      expr: sum(rate(controller_runtime_reconcile_errors_total{job=~".*((victoria.*)|vm)-?operator"}[5m]))
+        by(cluster) > 0
+      for: 10m
+      labels:
+        severity: warning
+        show_at: dashboard
+    - alert: HighQueueDepth
+      annotations:
+        dashboard: '{{ $externalURL }}/d/1H179hunk/victoriametrics-operator?ds={{
+          $labels.dc }}&orgId=1&viewPanel=20'
+        description: 'Operator cannot handle reconciliation load for controller: `{{-
+          $labels.name }}`, current depth: {{ $value }}'
+        summary: 'Too many `{{- $labels.name }}` in queue: {{ $value }}'
+      expr: sum(workqueue_depth{job=~".*((victoria.*)|vm)-?operator",name=~"(vmagent|vmalert|vmalertmanager|vmauth|vmcluster|vmnodescrape|vmpodscrape|vmprobe|vmrule|vmservicescrape|vmsingle|vmstaticscrape)"})
+        by(name,cluster) > 10
+      for: 15m
+      labels:
+        severity: warning
+        show_at: dashboard
