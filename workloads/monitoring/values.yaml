@@ -21,11 +21,12 @@ defaultDashboards:
     k8s-resources-windows-pod:        { enabled: false }
     nodes-darwin:                     { enabled: false }
     nodes-aix:                        { enabled: false }
-    k8s-resources-multicluster:       { enabled: false }   # кластер один            # отдаём ConfigMap'ы с label grafana_dashboard=1
+    k8s-resources-multicluster:       { enabled: false }
+    alertmanager-overview: { enabled: false }   # кластер один            # отдаём ConfigMap'ы с label grafana_dashboard=1
   annotations:
     argocd.argoproj.io/sync-options: ServerSideApply=true
 defaultRules:
-  enabled: true
+  enabled: false
 
 # ---------- RU: ничего не качаем в рантайме ----------
 syncJob:
@@ -63,14 +64,14 @@ defaultDatasources:
         access: proxy
 
 vmalert:
-  enabled: true
+  enabled: false
   spec:
     evaluationInterval: 30s
     externalLabels: { cluster: k8s-lab }
 
 # ---------- этап 1: заглушка. этап 2: configSecret из OpenBao (см. §6) ----------
 alertmanager:
-  enabled: true
+  enabled: false
   config:
     route: { receiver: blackhole, group_by: [alertname, cluster] }
     receivers: [{ name: blackhole }]
