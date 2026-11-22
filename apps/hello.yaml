@@ -1,0 +1,26 @@
+# apps/hello.yaml — первый ребёнок app-of-apps: проверка канала
+# git → ArgoCD → кластер. ЗАМЕНИТЬ <user> на свой GitHub-аккаунт.
+# ns hello создаёт ArgoCD (CreateNamespace=true) — в workload Namespace
+# не объявляем, чтобы не дублировать источник правды.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: hello
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/<user>/k8s-lab-gitops.git
+    targetRevision: main
+    path: workloads/hello
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: hello
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true 

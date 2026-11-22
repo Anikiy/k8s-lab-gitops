@@ -1,0 +1,24 @@
+# bootstrap/root-app.yaml — корень app-of-apps.
+# Применяется kubectl ОДИН раз (kubectl -n argocd -f bootstrap/root-app.yaml);
+# в watched dir (apps/) НЕ кладём — иначе root будет управлять сам собой.
+# ЗАМЕНИТЬ <user> на свой GitHub-аккаунт.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: root
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/<user>/k8s-lab-gitops.git
+    targetRevision: main
+    path: apps
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true 
