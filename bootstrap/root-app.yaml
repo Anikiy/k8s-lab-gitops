@@ -12,7 +12,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/<user>/k8s-lab-gitops.git
+    repoURL: https://github.com/Anikiy/k8s-lab-gitops
     targetRevision: main
     path: apps
   destination:
