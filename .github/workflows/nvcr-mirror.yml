@@ -30,6 +30,10 @@ jobs:
           OWNER: ${{ github.repository_owner }}
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # ghcr требует lowercase в ПУТИ репозитория (owner «Anikiy» -> «anikiy»);
+          # в логине регистр не важен — падает только push/copy:
+          #   invalid reference format: repository name must be lowercase
+          OWNER="${OWNER,,}"
           echo "$TOKEN" | skopeo login ghcr.io -u "$OWNER" --password-stdin
           skopeo copy --all \
             "docker://nvcr.io/${IMG}" \
