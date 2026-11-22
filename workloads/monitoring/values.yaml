@@ -85,6 +85,14 @@ kube-state-metrics:       { enabled: true }
 kubelet:               { enabled: true }
 coreDns:               { enabled: true }
 kubeApiServer:         { enabled: true }
+kubeProxy:
+  enabled: true
+  vmScrape:
+    spec:
+      endpoints:
+        - port: http-metrics
+          scheme: http
+
 kubeControllerManager:
   enabled: true
   vmScrape:
@@ -95,7 +103,7 @@ kubeControllerManager:
           bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
           tlsConfig:
             insecureSkipVerify: true
-            serverName: ""
+
 kubeScheduler:
   enabled: true
   vmScrape:
@@ -106,16 +114,7 @@ kubeScheduler:
           bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
           tlsConfig:
             insecureSkipVerify: true
-            serverName: ""
-kubeProxy:
-  enabled: true
-  vmScrape:
-    spec:
-      endpoints:
-        - port: http-metrics
-          scheme: http
 
-# ---------- etcd ВНЕ кластера ----------
 kubeEtcd:
   enabled: true
   endpoints:
