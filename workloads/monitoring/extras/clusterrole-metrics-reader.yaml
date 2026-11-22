@@ -1,0 +1,19 @@
+# workloads/monitoring/extras/clusterrole-metrics-reader.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata: { name: vmagent-metrics-reader }
+rules:
+- nonResourceURLs: ["/metrics", "/metrics/cadvisor"]
+  verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata: { name: vmagent-metrics-reader }
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: vmagent-metrics-reader
+subjects:
+- kind: ServiceAccount
+  name: vmagent-vmks
+  namespace: monitoring
