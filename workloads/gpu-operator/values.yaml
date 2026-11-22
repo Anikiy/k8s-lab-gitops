@@ -1,0 +1,70 @@
+# gpu-operator v26.7.3 — DRA-режим (gpuCluster) для k8s-lab
+#
+# Образы: СОБСТВЕННОЕ зеркало nvcr.io на ghcr.io (workflow nvcr-mirror,
+# прогон 2026-11-22, дайджесты идентичны nvcr.io — см. runbook P4 §3d).
+# Маппинг 1-в-1: nvcr.io/<X> -> ghcr.io/anikiy/nvcr-mirror/<X>
+# Пакеты public — imagePullSecrets не нужны.
+#
+# ВЗАИМОИСКЛЮЧАЮЩИЕ CR: clusterPolicy (device-plugin стек) vs gpuCluster (DRA).
+# nfd-субчарт остаётся на registry.k8s.io (доступен из RU, kubeadm оттуда же).
+
+# --- DRA стек вместо device-plugin стека ---
+clusterPolicy:
+  deployCR: false
+gpuCluster:
+  deployCR: true
+
+# --- все включённые компоненты -> зеркало ---
+operator:
+  repository: ghcr.io/anikiy/nvcr-mirror/nvidia
+validator:
+  repository: ghcr.io/anikiy/nvcr-mirror/nvidia
+
+driver:
+  repository: ghcr.io/anikiy/nvcr-mirror/nvidia
+  version: 595.91.07        # runtime-тег: 595.91.07-ubuntu24.04 (добавляет контроллер NVIDIADriver)
+  nvidiaDriverCRD:
+    enabled: true           # обязательно при gpuCluster.deployCR=true (validation чарта)
+  manager:
+    repository: ghcr.io/anikiy/nvcr-mirror/nvidia/cloud-native
+
+toolkit:
+  repository: ghcr.io/anikiy/nvcr-mirror/nvidia/k8s
+
+dcgmExporter:
+  repository: ghcr.io/anikiy/nvcr-mirror/nvidia/k8s
+
+draDriver:
+  repository: ghcr.io/anikiy/nvcr-mirror/nvidia
+
+# --- поля присутствуют в CR-спеках при enabled=false (контроллер не тянет),
+#     репозиторий переписан для консистентности, если однажды включишь ---
+dcgm:
+  repository: ghcr.io/anikiy/nvcr-mirror/nvidia/cloud-native
+gdrcopy:
+  enabled: false            # default=false; в CR попадает с repository — контроллер не тянет
+  repository: ghcr.io/anikiy/nvcr-mirror/nvidia/cloud-native
+
+# --- лаба: отключаем ненужные компоненты ---
+# ВНИМАНИЕ: их образов в зеркале НЕТ (k8s-mig-manager, nvidia-fs, gdrdrv-бит,
+# vgpu-*, kubevirt-plugin) — перед включением добавь образ в nvcr-mirror.
+migManager:
+  enabled: false
+ccManager:
+  enabled: false
+vfioManager:
+  enabled: false
+vgpuManager:
+  enabled: false
+vgpuDeviceManager:
+  enabled: false
+sandboxDevicePlugin:
+  enabled: false
+kataSandboxDevicePlugin:
+  enabled: false
+gds:
+  enabled: false
+
+# --- остаётся (всё на зеркале): operator, validator, driver + k8s-driver-manager,
+#     container-toolkit, dcgm-exporter, dra-driver (gpuCluster)
+#     + node-feature-discovery (registry.k8s.io/nfd/node-feature-discovery:v0.20.1, напрямую)
