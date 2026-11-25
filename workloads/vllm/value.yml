@@ -1,0 +1,93 @@
+apiVersion: v1
+kind: Namespace
+metadata: { name: llm }
+---
+apiVersion: resource.k8s.io/v1
+kind: ResourceClaimTemplate
+metadata:
+  name: single-gpu
+  namespace: llm
+spec:
+  spec:
+    devices:
+      requests:
+      - name: gpu
+        exactly:
+          deviceClassName: gpu.nvidia.com
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm-qwen
+  namespace: llm
+spec:
+  replicas: 1
+  strategy: { type: Recreate }   # одна GPU — без overlap при обновлении
+  selector:
+    matchLabels: { app: vllm-qwen }
+  template:
+    metadata:
+      labels: { app: vllm-qwen }
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: gpu-worker-1
+      tolerations:
+      - { key: nvidia.com/gpu, operator: Exists, effect: NoSchedule }
+      resourceClaims:
+      - name: gpu
+        resourceClaimTemplateName: single-gpu
+      containers:
+      - name: vllm
+        image: vllm/vllm-openai:v0.34.0
+        # runtimeClassName: nvidia   # раскомментируй, если CDI не подхватывается автоматически
+        args:
+        - --model=cyankiwi/Qwen3.5-9B-AWQ-4bit
+        - --served-model-name=qwen3.5-9b
+        - --max-model-len=32768
+        - --gpu-memory-utilization=0.92
+        - --max-num-seqs=4
+        - --language-model-only        # text-only: не грузим vision-encoder, экономим VRAM
+        - --reasoning-parser=qwen3
+        - --enable-auto-tool-choice
+        - --tool-call-parser=qwen3_coder
+        - --trust-remote-code
+        - --host=0.0.0.0
+        - --port=8000
+        env:
+        - { name: HF_HOME, value: /models }
+        - { name: OMP_NUM_THREADS, value: "4" }
+        resources:
+          claims:
+          - name: gpu
+          requests: { cpu: "4", memory: 12Gi }
+          limits: { memory: 24Gi }
+        ports:
+        - { containerPort: 8000 }
+        volumeMounts:
+        - { name: models, mountPath: /models }
+        - { name: shm, mountPath: /dev/shm }
+        startupProbe:
+          httpGet: { path: /health, port: 8000 }
+          periodSeconds: 15
+          failureThreshold: 80          # первый старт качает ~9 ГБ весов
+        readinessProbe:
+          httpGet: { path: /health, port: 8000 }
+          periodSeconds: 10
+        livenessProbe:
+          httpGet: { path: /health, port: 8000 }
+          periodSeconds: 30
+      volumes:
+      - name: models
+        hostPath: { path: /var/lib/hf-cache, type: DirectoryOrCreate }  # лучше PVC, если есть
+      - name: shm
+        emptyDir: { medium: Memory, sizeLimit: 2Gi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm-qwen
+  namespace: llm
+spec:
+  selector: { app: vllm-qwen }
+  ports:
+  - { port: 8000, targetPort: 8000 }
