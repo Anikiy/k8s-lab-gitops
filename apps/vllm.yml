@@ -1,20 +1,26 @@
+# apps/hello.yaml — первый ребёнок app-of-apps: проверка канала
+# git → ArgoCD → кластер. ЗАМЕНИТЬ <user> на свой GitHub-аккаунт.
+# ns hello создаёт ArgoCD (CreateNamespace=true) — в workload Namespace
+# не объявляем, чтобы не дублировать источник правды.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: monitoring-extras
+  name: vllm
   namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
 spec:
   project: default
-  destination:
-    server: https://kubernetes.default.svc
-    namespace: monitoring
   source:
-    repoURL: https://github.com/Anikiy/k8s-lab-gitops.git
+    repoURL: https://github.com/Anikiy/k8s-lab-gitops
     targetRevision: main
     path: workloads/vllm
-    directory:
-      recurse: true
-      include: value.yml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: vllm
   syncPolicy:
-    automated: { prune: true, selfHeal: true }
-    syncOptions: [ServerSideApply=true]
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true 
