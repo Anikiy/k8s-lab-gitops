@@ -1,31 +1,20 @@
-# gpu-operator: чарт из репо (NGC helm-repo не нужен), values из того же репо через $values
-# Паттерн: чарт лежит в workloads/gpu-operator/gpu-operator/, values — workloads/gpu-operator/values.yaml
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: vllm
+  name: monitoring-extras
   namespace: argocd
 spec:
   project: default
-  sources:
-    # ref для подстановки $values (тот же репо)
-    - repoURL: https://github.com/Anikiy/k8s-lab-gitops.git
-      targetRevision: main
-      ref: values
-    # чарт
-    - repoURL: https://github.com/Anikiy/k8s-lab-gitops.git
-      targetRevision: main
-      path: workloads/vllm
-      helm:
-        valueFiles:
-          - $values/workloads/vllm/values.yaml
   destination:
     server: https://kubernetes.default.svc
-    namespace: vllm
+    namespace: monitoring
+  source:
+    repoURL: https://github.com/Anikiy/k8s-lab-gitops.git
+    targetRevision: main
+    path: workloads/vllm
+    directory:
+      recurse: true
+      include: value.yml
   syncPolicy:
-    automated:
-      selfHeal: true
-      prune: false
-    syncOptions:
-      - CreateNamespace=true
-      - ServerSideApply=true   # CRD чарта > 262144 bytes — обычный apply падает
+    automated: { prune: true, selfHeal: true }
+    syncOptions: [ServerSideApply=true]
