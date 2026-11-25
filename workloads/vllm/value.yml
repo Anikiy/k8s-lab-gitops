@@ -59,8 +59,8 @@ spec:
         resources:
           claims:
           - name: gpu
-          requests: { cpu: "4", memory: 12Gi }
-          limits: { memory: 24Gi }
+          requests: { cpu: "2", memory: 4Gi }
+          limits: { memory: 7Gi }
         ports:
         - { containerPort: 8000 }
         volumeMounts:
