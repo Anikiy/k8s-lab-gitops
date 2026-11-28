@@ -38,7 +38,7 @@ spec:
         resourceClaimTemplateName: single-gpu
       containers:
       - name: sglang
-        image: lmsysorg/sglang:v0.5.9-cu130
+        image: lmsysorg/sglang:v0.5.23
         # ^ docker.io прямой путь у вас медленный; качаем через зеркало и ретагаем (см. ниже)
         args:
         - --model-path=cyankiwi/Qwen3.5-9B-AWQ-4bit
